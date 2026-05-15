@@ -13,53 +13,40 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Settings")
-                    .font(.headline)
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            Text("Settings")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
 
             Divider()
 
             VStack(spacing: 0) {
-                settingsRow {
-                    sectionLabel("Updates", icon: "arrow.triangle.2.circlepath")
-                }
-
-                settingsRow {
-                    Toggle("Auto-update", isOn: Binding(
+                row("Auto-update") {
+                    Toggle("", isOn: Binding(
                         get: { updater.automaticallyChecksForUpdates },
                         set: { updater.automaticallyChecksForUpdates = $0 }
                     ))
                     .toggleStyle(.switch)
-                    .font(.callout)
+                    .labelsHidden()
                 }
 
-                settingsRow {
-                    Button {
+                row {
+                    Button("Check for updates now") {
                         updater.checkForUpdates()
-                    } label: {
-                        Label("Check for Updates Now", systemImage: "arrow.clockwise")
-                            .font(.callout)
                     }
+                    .font(.caption)
+                    .foregroundStyle(updater.canCheckForUpdates ? Color.blue : Color.secondary)
                     .buttonStyle(.plain)
-                    .foregroundStyle(updater.canCheckForUpdates ? .blue : .secondary)
                     .disabled(!updater.canCheckForUpdates)
                 }
 
-                Divider().padding(.vertical, 4)
+                divider()
 
-                settingsRow {
-                    sectionLabel("General", icon: "macwindow")
-                }
-
-                settingsRow {
-                    Toggle("Launch at login", isOn: $launchAtLogin)
+                row("Launch at login") {
+                    Toggle("", isOn: $launchAtLogin)
                         .toggleStyle(.switch)
-                        .font(.callout)
+                        .labelsHidden()
                         .onChange(of: launchAtLogin) { enabled in
                             if enabled {
                                 try? SMAppService.mainApp.register()
@@ -70,72 +57,51 @@ struct SettingsView: View {
                         }
                 }
 
-                Divider().padding(.vertical, 4)
+                divider()
 
-                settingsRow {
-                    sectionLabel("Notifications", icon: "bell.fill")
-                }
-
-                settingsRow {
-                    Toggle("Alert on high usage", isOn: $notifyEnabled)
+                row("Usage alerts") {
+                    Toggle("", isOn: $notifyEnabled)
                         .toggleStyle(.switch)
-                        .font(.callout)
+                        .labelsHidden()
                         .onChange(of: notifyEnabled) { enabled in
                             if enabled { requestNotificationPermission() }
                         }
                 }
 
-                settingsRow {
-                    HStack {
-                        Text("Threshold")
-                            .font(.callout)
-                            .foregroundStyle(notifyEnabled ? .primary : .tertiary)
-                        Spacer()
-                        Text("\(notifyThresholdPercent)%")
-                            .font(.callout)
-                            .fontWeight(.medium)
-                            .monospacedDigit()
-                            .foregroundStyle(notifyEnabled ? .primary : .tertiary)
-                            .frame(width: 34, alignment: .trailing)
-                    }
+                row("Threshold") {
+                    Text("\(notifyThresholdPercent)%")
+                        .font(.callout)
+                        .fontWeight(.medium)
+                        .monospacedDigit()
+                        .foregroundStyle(notifyEnabled ? .primary : .tertiary)
                 }
+                .foregroundStyle(notifyEnabled ? .primary : .tertiary)
 
-                settingsRow {
+                row {
                     Slider(
                         value: Binding(
                             get: { Double(notifyThresholdPercent) },
                             set: { notifyThresholdPercent = Int($0.rounded()) }
                         ),
-                        in: 50...95,
-                        step: 5
+                        in: 50...95, step: 5
                     )
                     .tint(.orange)
                     .disabled(!notifyEnabled)
                     .opacity(notifyEnabled ? 1 : 0.35)
                 }
 
-                Divider().padding(.vertical, 4)
+                divider()
 
-                settingsRow {
-                    sectionLabel("Refresh", icon: "clock")
-                }
-
-                settingsRow {
-                    HStack {
-                        Text("Interval")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Picker("", selection: $refreshInterval) {
-                            Text("30s").tag(30.0)
-                            Text("1 min").tag(60.0)
-                            Text("5 min").tag(300.0)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 126)
-                        .onChange(of: refreshInterval) { interval in
-                            fetcher.setRefreshInterval(interval)
-                        }
+                row("Refresh interval") {
+                    Picker("", selection: $refreshInterval) {
+                        Text("30s").tag(30.0)
+                        Text("1m").tag(60.0)
+                        Text("5m").tag(300.0)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 110)
+                    .onChange(of: refreshInterval) { interval in
+                        fetcher.setRefreshInterval(interval)
                     }
                 }
             }
@@ -144,20 +110,26 @@ struct SettingsView: View {
         .frame(width: 260)
     }
 
-    // MARK: - Helpers
+    // MARK: - Layout helpers
 
-    private func settingsRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    @ViewBuilder
+    private func row<Control: View>(_ label: String? = nil, @ViewBuilder control: () -> Control) -> some View {
+        HStack {
+            if let label {
+                Text(label)
+                    .font(.callout)
+            }
+            Spacer()
+            control()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
     }
 
-    private func sectionLabel(_ text: String, icon: String) -> some View {
-        Label(text, systemImage: icon)
-            .font(.caption)
-            .fontWeight(.semibold)
-            .foregroundStyle(.secondary)
+    private func divider() -> some View {
+        Divider()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 2)
     }
 
     private func requestNotificationPermission() {

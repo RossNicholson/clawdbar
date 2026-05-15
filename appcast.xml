@@ -7,6 +7,19 @@
         <language>en</language>
 
         <item>
+            <title>Version 1.0.1</title>
+            <sparkle:releaseNotesLink>https://github.com/RossNicholson/clawdbar/releases/tag/v1.0.1</sparkle:releaseNotesLink>
+            <pubDate>Thu, 15 May 2026 00:00:00 +0000</pubDate>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
+            <enclosure
+                url="https://github.com/RossNicholson/clawdbar/releases/download/v1.0.1/ClawdBar-1.0.1.dmg"
+                sparkle:edSignature="Tw/fN4tFT94ofAEoMabCPezEWjv1YU6ZaoTBv2q/9vjpXQYHFRtN92BM3yHt1D2rFDZNKt0nztvupiHrhaGcDQ=="
+                length="1198391"
+                type="application/octet-stream" />
+        </item>
+
+        <item>
             <title>Version 1.0.0</title>
             <sparkle:releaseNotesLink>https://github.com/RossNicholson/clawdbar/releases/tag/v1.0.0</sparkle:releaseNotesLink>
             <pubDate>Thu, 15 May 2026 00:00:00 +0000</pubDate>

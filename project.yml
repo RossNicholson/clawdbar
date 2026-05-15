@@ -1,8 +1,4 @@
 name: ClawdBar
-packages:
-  Sparkle:
-    url: https://github.com/sparkle-project/Sparkle
-    from: "2.6.0"
 options:
   bundleIdPrefix: com.rossnicholson
   deploymentTarget:
@@ -22,9 +18,6 @@ targets:
   ClawdBar:
     type: application
     platform: macOS
-    dependencies:
-      - package: Sparkle
-        product: Sparkle
     sources:
       - path: ClawdBar
     info:
@@ -36,9 +29,6 @@ targets:
         LSUIElement: true
         NSHighResolutionCapable: true
         LSMinimumSystemVersion: "13.0"
-        SUFeedURL: https://raw.githubusercontent.com/RossNicholson/clawdbar/main/appcast.xml
-        SUEnableAutomaticChecks: true
-        SUPublicEDKey: vZxScA3AntD5j7JF6ixT3cNB55n8ZqDq7gJ/7CmoXkY=
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rossnicholson.ClawdBar

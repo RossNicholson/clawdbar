@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var eventMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
     let fetcher = UsageFetcher()
-    let updater = UpdaterViewModel()
+    let selfUpdater = SelfUpdater()
 
     private var hasGrantedAccess: Bool {
         get { UserDefaults.standard.bool(forKey: "hasGrantedAccess") }
@@ -33,9 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if hasGrantedAccess {
             setupUsagePanel()
             fetcher.start()
+            Task { await selfUpdater.checkSilent() }
         } else {
             setupWelcomePanel()
-            // Auto-open on first launch so the user sees the explanation
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.openPanel() }
         }
     }
@@ -97,7 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func setupUsagePanel() {
-        let content = MenuBarView().environmentObject(fetcher).environmentObject(updater)
+        let content = MenuBarView()
+            .environmentObject(fetcher)
+            .environmentObject(selfUpdater)
         let hostingView = NSHostingView(rootView: content)
         hostingView.autoresizingMask = [.width, .height]
         panel = makePanel(height: 220)
@@ -110,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setupUsagePanel()
         statusItem.button?.title = "––"
         fetcher.start()
-        // Open the usage panel immediately after granting
+        Task { await selfUpdater.checkSilent() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.openPanel() }
     }
 

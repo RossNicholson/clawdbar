@@ -4,7 +4,7 @@ import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject var fetcher: UsageFetcher
-    @EnvironmentObject var updater: UpdaterViewModel
+    @EnvironmentObject var selfUpdater: SelfUpdater
 
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @AppStorage("notifyEnabled") private var notifyEnabled = false
@@ -22,23 +22,27 @@ struct SettingsView: View {
             Divider()
 
             VStack(spacing: 0) {
-                row("Auto-update") {
-                    Toggle("", isOn: Binding(
-                        get: { updater.automaticallyChecksForUpdates },
-                        set: { updater.automaticallyChecksForUpdates = $0 }
-                    ))
-                    .toggleStyle(.switch)
-                    .labelsHidden()
+                if selfUpdater.updateAvailable {
+                    row {
+                        Button(selfUpdater.isUpdating ? "Updating…" : "Update ClawdBar…") {
+                            Task { await selfUpdater.update() }
+                        }
+                        .font(.callout)
+                        .foregroundStyle(.blue)
+                        .buttonStyle(.plain)
+                        .disabled(selfUpdater.isUpdating)
+                    }
+                    divider()
                 }
 
                 row {
-                    Button("Check for updates now") {
-                        updater.checkForUpdates()
+                    Button(selfUpdater.isChecking ? "Checking…" : "Check for updates") {
+                        Task { await selfUpdater.check() }
                     }
                     .font(.caption)
-                    .foregroundStyle(updater.canCheckForUpdates ? Color.blue : Color.secondary)
+                    .foregroundStyle(selfUpdater.isChecking ? Color.secondary : Color.blue)
                     .buttonStyle(.plain)
-                    .disabled(!updater.canCheckForUpdates)
+                    .disabled(selfUpdater.isChecking)
                 }
 
                 divider()

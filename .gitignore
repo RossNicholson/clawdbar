@@ -1,0 +1,8 @@
+.build/
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+ExportOptions.plist

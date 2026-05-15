@@ -38,5 +38,5 @@ targets:
         Release:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Developer ID Application"
-          DEVELOPMENT_TEAM: "5HQ5V9NP82"
+          DEVELOPMENT_TEAM: ""   # set your Apple Developer Team ID for release builds
           ENABLE_HARDENED_RUNTIME: YES

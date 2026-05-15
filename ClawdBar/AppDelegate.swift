@@ -7,26 +7,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var panel: NSPanel!
     private var eventMonitor: Any?
+    private var cancellables = Set<AnyCancellable>()
     let fetcher = UsageFetcher()
+
+    private var hasGrantedAccess: Bool {
+        get { UserDefaults.standard.bool(forKey: "hasGrantedAccess") }
+        set { UserDefaults.standard.set(newValue, forKey: "hasGrantedAccess") }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.title = "––"
+            button.title = hasGrantedAccess ? "––" : "🐾"
             button.action = #selector(togglePanel)
             button.target = self
         }
 
-        setupPanel()
         fetcher.$usage.receive(on: RunLoop.main).sink { [weak self] (_: UsageData) in
             self?.updateStatusTitle()
         }.store(in: &cancellables)
-        fetcher.start()
+
+        if hasGrantedAccess {
+            setupUsagePanel()
+            fetcher.start()
+        } else {
+            setupWelcomePanel()
+            // Auto-open on first launch so the user sees the explanation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.openPanel() }
+        }
     }
 
-    private var cancellables = Set<AnyCancellable>()
+    // MARK: - Status title
 
     private func updateStatusTitle() {
         guard let button = statusItem.button else { return }
@@ -34,13 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let w = fetcher.usage.weekly7d.map { "\(Int($0 * 100))%" } ?? "–"
 
         let attr = NSMutableAttributedString()
-        attr.append(NSAttributedString(string: s, attributes: [
-            .foregroundColor: usageColor(fetcher.usage.session5h ?? 0)
-        ]))
+        attr.append(NSAttributedString(string: s, attributes: [.foregroundColor: usageColor(fetcher.usage.session5h ?? 0)]))
         attr.append(NSAttributedString(string: " · "))
-        attr.append(NSAttributedString(string: w, attributes: [
-            .foregroundColor: usageColor(fetcher.usage.weekly7d ?? 0)
-        ]))
+        attr.append(NSAttributedString(string: w, attributes: [.foregroundColor: usageColor(fetcher.usage.weekly7d ?? 0)]))
         button.attributedTitle = attr
     }
 
@@ -52,31 +61,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func setupPanel() {
-        let content = MenuBarView().environmentObject(fetcher)
-        let hostingView = NSHostingView(rootView: content)
-        hostingView.autoresizingMask = [.width, .height]
+    // MARK: - Panel setup
 
-        panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 220),
+    private func makePanel(height: CGFloat) -> NSPanel {
+        let p = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: height),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        panel.contentView = hostingView
-        panel.delegate = self
-        panel.isFloatingPanel = true
-        panel.level = .popUpMenu
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.isMovableByWindowBackground = true
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        p.delegate = self
+        p.isFloatingPanel = true
+        p.level = .popUpMenu
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.titleVisibility = .hidden
+        p.titlebarAppearsTransparent = true
+        p.isMovableByWindowBackground = true
+        p.standardWindowButton(.closeButton)?.isHidden = true
+        p.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        p.standardWindowButton(.zoomButton)?.isHidden = true
+        return p
     }
+
+    private func setupWelcomePanel() {
+        let content = WelcomeView { [weak self] in
+            self?.grantAccess()
+        }
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.autoresizingMask = [.width, .height]
+        panel = makePanel(height: 320)
+        panel.contentView = hostingView
+    }
+
+    private func setupUsagePanel() {
+        let content = MenuBarView().environmentObject(fetcher)
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.autoresizingMask = [.width, .height]
+        panel = makePanel(height: 220)
+        panel.contentView = hostingView
+    }
+
+    private func grantAccess() {
+        hasGrantedAccess = true
+        closePanel()
+        setupUsagePanel()
+        statusItem.button?.title = "––"
+        fetcher.start()
+        // Open the usage panel immediately after granting
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.openPanel() }
+    }
+
+    // MARK: - Panel show/hide
 
     @objc func togglePanel() {
         if panel.isVisible { closePanel() } else { openPanel() }

@@ -1,4 +1,3 @@
-import CommonCrypto
 import Foundation
 import Security
 
@@ -49,11 +48,25 @@ final class UsageFetcher: ObservableObject {
     // MARK: - Credential reading
 
     private func readAccessToken() throws -> String {
-        if let token = try? readCLIToken() { return token }
-        return try readDesktopAppToken()
+        // 1. Claude Code desktop app Keychain entry
+        if let token = try? keychainCredentials() { return token }
+        // 2. Standalone CLI credentials file
+        if let token = try? cliFileCredentials() { return token }
+        throw FetchError.noCredentials
     }
 
-    private func readCLIToken() throws -> String {
+    private func keychainCredentials() throws -> String {
+        let raw = try keychainPassword(service: "Claude Code-credentials")
+        guard let data = raw.data(using: .utf8),
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = json["claudeAiOauth"] as? [String: Any],
+              let token = oauth["accessToken"] as? String else {
+            throw FetchError.noCredentials
+        }
+        return token
+    }
+
+    private func cliFileCredentials() throws -> String {
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/.credentials.json")
         let data = try Data(contentsOf: path)
@@ -63,53 +76,6 @@ final class UsageFetcher: ObservableObject {
         }
         return token
     }
-
-    private func readDesktopAppToken() throws -> String {
-        let keychainKey = try keychainPassword(service: "Claude Safe Storage")
-        let salt = Data("saltysalt".utf8)
-        let aesKey = pbkdf2SHA1(password: keychainKey, salt: salt, iterations: 1003, keyLength: 16)
-
-        let configPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Claude/config.json")
-        let configData = try Data(contentsOf: configPath)
-
-        guard let config = try JSONSerialization.jsonObject(with: configData) as? [String: Any],
-              let tokenCacheStr = config["oauth:tokenCache"] as? String else {
-            throw FetchError.noCredentials
-        }
-
-        let padCount = (4 - tokenCacheStr.count % 4) % 4
-        let padded = tokenCacheStr + String(repeating: "=", count: padCount)
-        guard let encrypted = Data(base64Encoded: padded), encrypted.count > 3 else {
-            throw FetchError.noCredentials
-        }
-
-        let ciphertext = Data(encrypted.dropFirst(3))
-        let iv = Data(repeating: 0x20, count: 16)
-        let decrypted = try aesDecrypt(key: aesKey, iv: iv, ciphertext: ciphertext)
-
-        guard let tokenCache = try JSONSerialization.jsonObject(with: decrypted) as? [String: Any] else {
-            throw FetchError.noCredentials
-        }
-
-        // Prefer the most permissive scope
-        let sorted = tokenCache.sorted { a, b in
-            let score: (String) -> Int = { key in
-                if key.contains("claude_code") { return 2 }
-                if key.contains("profile") { return 1 }
-                return 0
-            }
-            return score(a.key) > score(b.key)
-        }
-
-        guard let entry = sorted.first?.value as? [String: Any],
-              let token = entry["token"] as? String else {
-            throw FetchError.noCredentials
-        }
-        return token
-    }
-
-    // MARK: - Crypto
 
     private func keychainPassword(service: String) throws -> String {
         let query: [String: Any] = [
@@ -125,49 +91,6 @@ final class UsageFetcher: ObservableObject {
             throw FetchError.noCredentials
         }
         return key
-    }
-
-    private func pbkdf2SHA1(password: String, salt: Data, iterations: UInt32, keyLength: Int) -> Data {
-        let passwordData = Data(password.utf8)
-        var derivedKey = Data(count: keyLength)
-        passwordData.withUnsafeBytes { pwdBytes in
-            salt.withUnsafeBytes { saltBytes in
-                derivedKey.withUnsafeMutableBytes { dkBytes in
-                    _ = CCKeyDerivationPBKDF(
-                        CCPBKDFAlgorithm(kCCPBKDF2),
-                        pwdBytes.baseAddress?.assumingMemoryBound(to: Int8.self),
-                        passwordData.count,
-                        saltBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
-                        salt.count,
-                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1),
-                        iterations,
-                        dkBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
-                        keyLength
-                    )
-                }
-            }
-        }
-        return derivedKey
-    }
-
-    private func aesDecrypt(key: Data, iv: Data, ciphertext: Data) throws -> Data {
-        let keyBytes = [UInt8](key)
-        let ivBytes = [UInt8](iv)
-        let ciphertextBytes = [UInt8](ciphertext)
-        var outputBuffer = [UInt8](repeating: 0, count: ciphertext.count + kCCBlockSizeAES128)
-        var numDecrypted = 0
-        let status = CCCrypt(
-            CCOperation(kCCDecrypt),
-            CCAlgorithm(kCCAlgorithmAES128),
-            CCOptions(kCCOptionPKCS7Padding),
-            keyBytes, key.count,
-            ivBytes,
-            ciphertextBytes, ciphertext.count,
-            &outputBuffer, outputBuffer.count,
-            &numDecrypted
-        )
-        guard status == kCCSuccess else { throw FetchError.decryptionFailed }
-        return Data(outputBuffer.prefix(numDecrypted))
     }
 
     // MARK: - API
@@ -189,21 +112,30 @@ final class UsageFetcher: ObservableObject {
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw FetchError.badResponse }
 
-        let headers = http.allHeaderFields as? [String: String] ?? [:]
-        let isoParser = ISO8601DateFormatter()
-        isoParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        // allHeaderFields keys are NSString — bridge manually and normalize to lowercase
+        var headers = [String: String]()
+        for (key, value) in http.allHeaderFields {
+            if let k = key as? String, let v = value as? String {
+                headers[k.lowercased()] = v
+            }
+        }
 
+        guard headers.keys.contains(where: { $0.hasPrefix("anthropic-ratelimit-unified") }) else {
+            throw FetchError.noRateLimitHeaders(statusCode: http.statusCode)
+        }
+
+        // Reset values are Unix timestamps in seconds
         var result = UsageData()
         result.session5h = headers["anthropic-ratelimit-unified-5h-utilization"].flatMap(Double.init)
         result.weekly7d = headers["anthropic-ratelimit-unified-7d-utilization"].flatMap(Double.init)
-        result.session5hReset = headers["anthropic-ratelimit-unified-5h-reset"].flatMap {
-            isoParser.date(from: $0) ?? ISO8601DateFormatter().date(from: $0)
-        }
-        result.weekly7dReset = headers["anthropic-ratelimit-unified-7d-reset"].flatMap {
-            isoParser.date(from: $0) ?? ISO8601DateFormatter().date(from: $0)
-        }
+        result.session5hReset = headers["anthropic-ratelimit-unified-5h-reset"].flatMap(unixDate)
+        result.weekly7dReset = headers["anthropic-ratelimit-unified-7d-reset"].flatMap(unixDate)
         result.status = headers["anthropic-ratelimit-unified-5h-status"]
         return result
+    }
+
+    private func unixDate(_ s: String) -> Date? {
+        Double(s).map { Date(timeIntervalSince1970: $0) }
     }
 
     // MARK: - Errors
@@ -211,13 +143,16 @@ final class UsageFetcher: ObservableObject {
     enum FetchError: LocalizedError {
         case noCredentials
         case badResponse
-        case decryptionFailed
+        case noRateLimitHeaders(statusCode: Int)
 
         var errorDescription: String? {
             switch self {
-            case .noCredentials:    return "No Claude credentials found"
-            case .badResponse:      return "Unexpected response from Anthropic API"
-            case .decryptionFailed: return "Failed to decrypt credentials"
+            case .noCredentials:
+                return "No Claude credentials found — log in via Claude Code or the desktop app"
+            case .badResponse:
+                return "Unexpected response from Anthropic API"
+            case .noRateLimitHeaders(let code):
+                return "No rate-limit data in response (HTTP \(code)) — Claude Max plan required"
             }
         }
     }

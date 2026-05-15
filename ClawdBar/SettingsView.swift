@@ -12,139 +12,148 @@ struct SettingsView: View {
     @AppStorage("refreshInterval") private var refreshInterval = 60.0
 
     var body: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 6) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            // Header
+            HStack {
                 Text("Settings")
-                    .font(.title3).fontWeight(.semibold)
+                    .font(.headline)
+                Spacer()
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 14) {
-                updatesSection
-                Divider()
-                startupSection
-                Divider()
-                notificationsSection
-                Divider()
-                pollingSection
-            }
-        }
-        .padding(20)
-        .frame(width: 260)
-    }
-
-    // MARK: - Sections
-
-    private var updatesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            label("Updates", icon: "arrow.triangle.2.circlepath")
-
-            Toggle("Check for updates automatically", isOn: Binding(
-                get: { updater.automaticallyChecksForUpdates },
-                set: { updater.automaticallyChecksForUpdates = $0 }
-            ))
-            .toggleStyle(.switch)
-            .font(.callout)
-
-            Button {
-                updater.checkForUpdates()
-            } label: {
-                Label("Check for Updates Now", systemImage: "arrow.clockwise")
-                    .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.blue)
-            .liquidGlassInteractive(in: Capsule())
-            .disabled(!updater.canCheckForUpdates)
-        }
-    }
-
-    private var startupSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            label("General", icon: "macwindow")
-
-            Toggle("Launch at login", isOn: $launchAtLogin)
-                .toggleStyle(.switch)
-                .font(.callout)
-                .onChange(of: launchAtLogin) { enabled in
-                    if enabled {
-                        try? SMAppService.mainApp.register()
-                    } else {
-                        try? SMAppService.mainApp.unregister()
-                    }
-                    launchAtLogin = SMAppService.mainApp.status == .enabled
-                }
-        }
-    }
-
-    private var notificationsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            label("Notifications", icon: "bell.fill")
-
-            Toggle("Alert when usage exceeds threshold", isOn: $notifyEnabled)
-                .toggleStyle(.switch)
-                .font(.callout)
-                .onChange(of: notifyEnabled) { enabled in
-                    if enabled { requestNotificationPermission() }
+            VStack(spacing: 0) {
+                settingsRow {
+                    sectionLabel("Updates", icon: "arrow.triangle.2.circlepath")
                 }
 
-            if notifyEnabled {
-                HStack {
-                    Text("Threshold")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(notifyThresholdPercent)%")
-                        .font(.callout)
-                        .fontWeight(.medium)
-                        .monospacedDigit()
-                        .frame(width: 36, alignment: .trailing)
-                }
-                Slider(
-                    value: Binding(
-                        get: { Double(notifyThresholdPercent) },
-                        set: { notifyThresholdPercent = Int($0.rounded()) }
-                    ),
-                    in: 50...95,
-                    step: 5
-                )
-                .tint(.orange)
-            }
-        }
-    }
-
-    private var pollingSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            label("Polling", icon: "clock")
-
-            HStack {
-                Text("Refresh interval")
+                settingsRow {
+                    Toggle("Auto-update", isOn: Binding(
+                        get: { updater.automaticallyChecksForUpdates },
+                        set: { updater.automaticallyChecksForUpdates = $0 }
+                    ))
+                    .toggleStyle(.switch)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Picker("", selection: $refreshInterval) {
-                    Text("30s").tag(30.0)
-                    Text("1 min").tag(60.0)
-                    Text("5 min").tag(300.0)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 120)
-                .onChange(of: refreshInterval) { interval in
-                    fetcher.setRefreshInterval(interval)
+
+                settingsRow {
+                    Button {
+                        updater.checkForUpdates()
+                    } label: {
+                        Label("Check for Updates Now", systemImage: "arrow.clockwise")
+                            .font(.callout)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(updater.canCheckForUpdates ? .blue : .secondary)
+                    .disabled(!updater.canCheckForUpdates)
+                }
+
+                Divider().padding(.vertical, 4)
+
+                settingsRow {
+                    sectionLabel("General", icon: "macwindow")
+                }
+
+                settingsRow {
+                    Toggle("Launch at login", isOn: $launchAtLogin)
+                        .toggleStyle(.switch)
+                        .font(.callout)
+                        .onChange(of: launchAtLogin) { enabled in
+                            if enabled {
+                                try? SMAppService.mainApp.register()
+                            } else {
+                                try? SMAppService.mainApp.unregister()
+                            }
+                            launchAtLogin = SMAppService.mainApp.status == .enabled
+                        }
+                }
+
+                Divider().padding(.vertical, 4)
+
+                settingsRow {
+                    sectionLabel("Notifications", icon: "bell.fill")
+                }
+
+                settingsRow {
+                    Toggle("Alert on high usage", isOn: $notifyEnabled)
+                        .toggleStyle(.switch)
+                        .font(.callout)
+                        .onChange(of: notifyEnabled) { enabled in
+                            if enabled { requestNotificationPermission() }
+                        }
+                }
+
+                settingsRow {
+                    HStack {
+                        Text("Threshold")
+                            .font(.callout)
+                            .foregroundStyle(notifyEnabled ? .primary : .tertiary)
+                        Spacer()
+                        Text("\(notifyThresholdPercent)%")
+                            .font(.callout)
+                            .fontWeight(.medium)
+                            .monospacedDigit()
+                            .foregroundStyle(notifyEnabled ? .primary : .tertiary)
+                            .frame(width: 34, alignment: .trailing)
+                    }
+                }
+
+                settingsRow {
+                    Slider(
+                        value: Binding(
+                            get: { Double(notifyThresholdPercent) },
+                            set: { notifyThresholdPercent = Int($0.rounded()) }
+                        ),
+                        in: 50...95,
+                        step: 5
+                    )
+                    .tint(.orange)
+                    .disabled(!notifyEnabled)
+                    .opacity(notifyEnabled ? 1 : 0.35)
+                }
+
+                Divider().padding(.vertical, 4)
+
+                settingsRow {
+                    sectionLabel("Refresh", icon: "clock")
+                }
+
+                settingsRow {
+                    HStack {
+                        Text("Interval")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Picker("", selection: $refreshInterval) {
+                            Text("30s").tag(30.0)
+                            Text("1 min").tag(60.0)
+                            Text("5 min").tag(300.0)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 126)
+                        .onChange(of: refreshInterval) { interval in
+                            fetcher.setRefreshInterval(interval)
+                        }
+                    }
                 }
             }
+            .padding(.vertical, 4)
         }
+        .frame(width: 260)
     }
 
     // MARK: - Helpers
 
-    private func label(_ text: String, icon: String) -> some View {
+    private func settingsRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func sectionLabel(_ text: String, icon: String) -> some View {
         Label(text, systemImage: icon)
             .font(.caption)
             .fontWeight(.semibold)

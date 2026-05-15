@@ -38,6 +38,7 @@ targets:
         LSMinimumSystemVersion: "13.0"
         SUFeedURL: https://raw.githubusercontent.com/RossNicholson/clawdbar/main/appcast.xml
         SUEnableAutomaticChecks: true
+        SUPublicEDKey: vZxScA3AntD5j7JF6ixT3cNB55n8ZqDq7gJ/7CmoXkY=
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rossnicholson.ClawdBar

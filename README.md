@@ -12,11 +12,11 @@ Instead of hunting through the Claude UI, just glance at your menu bar. ClawdBar
 - **Popover** — progress bars, exact percentages, and time until each limit resets
 - **Notifications** — optional alerts when you hit a configurable threshold
 - **Auto-refresh** — configurable polling (30s / 1 min / 5 min)
-- **Auto-update** — Sparkle-powered background updates
+- **Auto-update** — Homebrew-based update checks
 - **Launch at login** — runs silently from startup
 - 100% native SwiftUI · no Electron · no telemetry · Liquid Glass UI on macOS 26 Tahoe
 
-> **Requires a Claude Max subscription.** The unified rate-limit headers that ClawdBar reads are only returned for Max plans.
+> **Requires a Claude subscription with usage limits** (Pro or Max). The unified rate-limit headers that ClawdBar reads are returned for plans that have token-based rate limits.
 
 ---
 
@@ -49,7 +49,7 @@ Click the gear icon in the popover to open Settings:
 
 | Setting | Description |
 |---|---|
-| **Auto-update** | Toggle Sparkle automatic update checks |
+| **Check for updates** | Manually check for a new version via Homebrew |
 | **Launch at login** | Start ClawdBar silently at system login |
 | **Notifications** | Enable usage alerts with a configurable threshold (50–95%) |
 | **Refresh interval** | How often to poll the API: 30 seconds, 1 minute (default), or 5 minutes |

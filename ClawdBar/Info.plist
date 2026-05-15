@@ -26,5 +26,9 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/RossNicholson/clawdbar/main/appcast.xml</string>
 </dict>
 </plist>

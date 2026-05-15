@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import UserNotifications
 
 struct UsageData: Sendable {
     var session5h: Double?      // 0.0–1.0
@@ -17,18 +18,29 @@ final class UsageFetcher: ObservableObject {
     @Published var lastUpdated: Date?
 
     private var timer: Timer?
-    private let pollInterval: TimeInterval = 60
+    private var hasNotified5h = false
+    private var hasNotified7d = false
 
     func start() {
+        let interval = UserDefaults.standard.double(forKey: "refreshInterval").nonZero ?? 60
         Task { await refresh() }
-        timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in await self?.refresh() }
-        }
+        scheduleTimer(interval: interval)
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+    }
+
+    func setRefreshInterval(_ interval: TimeInterval) {
+        scheduleTimer(interval: interval)
+    }
+
+    private func scheduleTimer(interval: TimeInterval) {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.refresh() }
+        }
     }
 
     func refresh() async {
@@ -39,6 +51,7 @@ final class UsageFetcher: ObservableObject {
             let result = try await fetchUsage(token: token)
             usage = result
             lastUpdated = Date()
+            checkNotifications(for: result)
         } catch {
             lastError = error.localizedDescription
         }
@@ -138,6 +151,46 @@ final class UsageFetcher: ObservableObject {
         Double(s).map { Date(timeIntervalSince1970: $0) }
     }
 
+    // MARK: - Notifications
+
+    private func checkNotifications(for result: UsageData) {
+        guard UserDefaults.standard.bool(forKey: "notifyEnabled") else {
+            hasNotified5h = false
+            hasNotified7d = false
+            return
+        }
+        let threshold = Double(UserDefaults.standard.integer(forKey: "notifyThresholdPercent")) / 100.0
+
+        if let util = result.session5h {
+            if util >= threshold && !hasNotified5h {
+                hasNotified5h = true
+                notify(id: "5h", title: "5h session at \(Int(util * 100))%",
+                       body: "Your Claude Code 5-hour usage has reached your alert threshold.")
+            } else if util < threshold - 0.1 {
+                hasNotified5h = false
+            }
+        }
+
+        if let util = result.weekly7d {
+            if util >= threshold && !hasNotified7d {
+                hasNotified7d = true
+                notify(id: "7d", title: "7d weekly at \(Int(util * 100))%",
+                       body: "Your Claude Code 7-day usage has reached your alert threshold.")
+            } else if util < threshold - 0.1 {
+                hasNotified7d = false
+            }
+        }
+    }
+
+    private func notify(id: String, title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
     // MARK: - Errors
 
     enum FetchError: LocalizedError {
@@ -156,6 +209,10 @@ final class UsageFetcher: ObservableObject {
             }
         }
     }
+}
+
+private extension Double {
+    var nonZero: Double? { self == 0 ? nil : self }
 }
 
 func formatTimeRemaining(until date: Date) -> String {

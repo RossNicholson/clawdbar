@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var eventMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
     let fetcher = UsageFetcher()
+    let updater = UpdaterViewModel()
 
     private var hasGrantedAccess: Bool {
         get { UserDefaults.standard.bool(forKey: "hasGrantedAccess") }
@@ -96,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func setupUsagePanel() {
-        let content = MenuBarView().environmentObject(fetcher)
+        let content = MenuBarView().environmentObject(fetcher).environmentObject(updater)
         let hostingView = NSHostingView(rootView: content)
         hostingView.autoresizingMask = [.width, .height]
         panel = makePanel(height: 220)

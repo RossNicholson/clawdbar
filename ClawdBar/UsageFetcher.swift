@@ -20,6 +20,7 @@ final class UsageFetcher: ObservableObject {
     private var timer: Timer?
     private var hasNotified5h = false
     private var hasNotified7d = false
+    private var cachedToken: String?
 
     func start() {
         let interval = UserDefaults.standard.double(forKey: "refreshInterval").nonZero ?? 60
@@ -47,8 +48,17 @@ final class UsageFetcher: ObservableObject {
         isLoading = true
         lastError = nil
         do {
-            let token = try readAccessToken()
-            let result = try await fetchUsage(token: token)
+            let token = try cachedToken ?? readAccessToken()
+            cachedToken = token
+            let result: UsageData
+            do {
+                result = try await fetchUsage(token: token)
+            } catch FetchError.tokenRejected {
+                // Cached token no longer valid — re-read keychain once and retry.
+                let fresh = try readAccessToken()
+                cachedToken = fresh
+                result = try await fetchUsage(token: fresh)
+            }
             usage = result
             lastUpdated = Date()
             checkNotifications(for: result)
@@ -125,6 +135,8 @@ final class UsageFetcher: ObservableObject {
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw FetchError.badResponse }
 
+        if http.statusCode == 401 { throw FetchError.tokenRejected }
+
         // allHeaderFields keys are NSString — bridge manually and normalize to lowercase
         var headers = [String: String]()
         for (key, value) in http.allHeaderFields {
@@ -196,6 +208,7 @@ final class UsageFetcher: ObservableObject {
     enum FetchError: LocalizedError {
         case noCredentials
         case badResponse
+        case tokenRejected
         case noRateLimitHeaders(statusCode: Int)
 
         var errorDescription: String? {
@@ -204,6 +217,8 @@ final class UsageFetcher: ObservableObject {
                 return "No Claude credentials found — log in via Claude Code or the desktop app"
             case .badResponse:
                 return "Unexpected response from Anthropic API"
+            case .tokenRejected:
+                return "Claude credentials were rejected — try signing in again via Claude Code"
             case .noRateLimitHeaders(let code):
                 return "No rate-limit data in response (HTTP \(code)) — Claude Max plan required"
             }

@@ -6,4 +6,4 @@ DerivedData/
 *.ipa
 *.dSYM.zip
 *.dSYM
-ExportOptions.plist
+# ExportOptions.plist is committed — CI needs it (no secrets in it)

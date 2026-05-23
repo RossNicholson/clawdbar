@@ -5,6 +5,8 @@ import UserNotifications
 struct SettingsView: View {
     @EnvironmentObject var fetcher: UsageFetcher
     @EnvironmentObject var selfUpdater: SelfUpdater
+    @ObservedObject private var auth = ClaudeAuth.shared
+    @Environment(\.dismiss) private var dismiss
 
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @AppStorage("notifyEnabled") private var notifyEnabled = false
@@ -106,6 +108,28 @@ struct SettingsView: View {
                     .frame(width: 110)
                     .onChange(of: refreshInterval) { interval in
                         fetcher.setRefreshInterval(interval)
+                    }
+                }
+
+                divider()
+
+                row("Claude sign-in") {
+                    if auth.isLoggedIn {
+                        Button("Log out") {
+                            auth.logout()
+                            Task { await fetcher.refresh() }
+                        }
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .buttonStyle(.plain)
+                    } else {
+                        Button("Log in") {
+                            dismiss()              // close this popover so the login sheet can show
+                            auth.beginLogin()
+                        }
+                        .font(.callout)
+                        .foregroundStyle(.purple)
+                        .buttonStyle(.plain)
                     }
                 }
             }

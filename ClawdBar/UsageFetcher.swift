@@ -78,14 +78,38 @@ final class UsageFetcher: ObservableObject {
         throw FetchError.noCredentials
     }
 
+    /// Reads the Claude Code OAuth access token from the Keychain.
+    ///
+    /// There can be MORE THAN ONE "Claude Code-credentials" item — e.g. a stale
+    /// entry left by an old login sitting next to the live one. A `kSecMatchLimitOne`
+    /// query returns an *arbitrary* match, which is how we'd end up using an expired
+    /// token and getting 401s ("credentials rejected") even though a valid token is
+    /// present. So read them all and pick the token with the latest `expiresAt`.
     private func keychainCredentials() throws -> String {
-        let raw = try keychainPassword(service: "Claude Code-credentials")
-        guard let data = raw.data(using: .utf8),
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let oauth = json["claudeAiOauth"] as? [String: Any],
-              let token = oauth["accessToken"] as? String else {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else {
             throw FetchError.noCredentials
         }
+        // A single match comes back as Data; multiple matches as [Data].
+        let blobs: [Data] = (result as? [Data]) ?? (result as? Data).map { [$0] } ?? []
+
+        var best: (token: String, expiresAt: Double)?
+        for data in blobs {
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let oauth = json["claudeAiOauth"] as? [String: Any],
+                  let token = oauth["accessToken"] as? String else { continue }
+            let expiresAt = (oauth["expiresAt"] as? NSNumber)?.doubleValue ?? 0
+            if best == nil || expiresAt > best!.expiresAt {
+                best = (token, expiresAt)
+            }
+        }
+        guard let token = best?.token else { throw FetchError.noCredentials }
         return token
     }
 
@@ -98,22 +122,6 @@ final class UsageFetcher: ObservableObject {
             throw FetchError.noCredentials
         }
         return token
-    }
-
-    private func keychainPassword(service: String) throws -> String {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let key = String(data: data, encoding: .utf8) else {
-            throw FetchError.noCredentials
-        }
-        return key
     }
 
     // MARK: - API

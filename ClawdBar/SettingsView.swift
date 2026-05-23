@@ -113,25 +113,31 @@ struct SettingsView: View {
 
                 divider()
 
-                row("Claude sign-in") {
-                    if auth.isLoggedIn {
-                        Button("Log out") {
-                            auth.logout()
-                            Task { await fetcher.refresh() }
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("Claude account").font(.callout)
+                        Spacer()
+                        if auth.isLoggedIn {
+                            Button("Log out") {
+                                auth.logout()
+                                Task { await fetcher.refresh() }
+                            }
+                            .font(.callout).foregroundStyle(.red).buttonStyle(.plain)
+                        } else {
+                            Button("Log in") {
+                                dismiss()          // close this popover so the login sheet can show
+                                auth.beginLogin()
+                            }
+                            .font(.callout).foregroundStyle(.purple).buttonStyle(.plain)
                         }
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .buttonStyle(.plain)
-                    } else {
-                        Button("Log in") {
-                            dismiss()              // close this popover so the login sheet can show
-                            auth.beginLogin()
-                        }
-                        .font(.callout)
-                        .foregroundStyle(.purple)
-                        .buttonStyle(.plain)
                     }
+                    Text(accountStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
             }
             .padding(.vertical, 4)
         }
@@ -158,6 +164,14 @@ struct SettingsView: View {
         Divider()
             .padding(.horizontal, 14)
             .padding(.vertical, 2)
+    }
+
+    private var accountStatus: String {
+        if auth.isLoggedIn { return "Signed in with ClawdBar's own login." }
+        if fetcher.lastError == nil && fetcher.lastUpdated != nil {
+            return "Using Claude Code's sign-in — log in to make ClawdBar independent of it."
+        }
+        return "Not signed in."
     }
 
     private func requestNotificationPermission() {

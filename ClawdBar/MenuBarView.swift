@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var fetcher: UsageFetcher
+    @ObservedObject private var auth = ClaudeAuth.shared
     @State private var now = Date()
     @State private var showingSettings = false
     @State private var showingHelp = false
@@ -32,6 +33,9 @@ struct MenuBarView: View {
         .frame(width: 280)
         .liquidGlassBackground(in: Rectangle())
         .onReceive(timer) { now = $0 }
+        .sheet(isPresented: $auth.awaitingCode) {
+            LoginCodeView { Task { await fetcher.refresh() } }
+        }
     }
 
     private var dividerOpacity: Double {
@@ -130,6 +134,12 @@ struct MenuBarView: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer()
+            if fetcher.lastError != nil {
+                Button("Log in") { auth.beginLogin() }
+                    .font(.caption)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.purple)
+            }
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .font(.caption)
                 .buttonStyle(.plain)
@@ -304,5 +314,51 @@ struct MenuBarView: View {
         }
         .padding(20)
         .frame(width: 220)
+    }
+}
+
+/// Sheet shown after the browser opens for sign-in: the user pastes back the code.
+struct LoginCodeView: View {
+    @ObservedObject private var auth = ClaudeAuth.shared
+    @State private var code = ""
+    var onSuccess: () -> Void = {}
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "pawprint.fill").foregroundStyle(.purple)
+                Text("Log in with Claude").font(.headline)
+            }
+            Text("Your browser opened to authorize ClawdBar. After you approve, copy the code shown on that page and paste it here.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("Paste authorization code", text: $code)
+                .textFieldStyle(.roundedBorder)
+                .disableAutocorrection(true)
+
+            if let err = auth.loginError {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Button("Cancel") { auth.cancelLogin() }
+                Spacer()
+                Button(auth.working ? "Verifying…" : "Complete Login") {
+                    Task {
+                        await auth.completeLogin(pasted: code)
+                        if auth.isLoggedIn { onSuccess() }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty || auth.working)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
     }
 }

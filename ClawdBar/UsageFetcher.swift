@@ -48,14 +48,18 @@ final class UsageFetcher: ObservableObject {
         isLoading = true
         lastError = nil
         do {
-            let token = try cachedToken ?? readAccessToken()
+            let token: String
+            if let cached = cachedToken { token = cached }
+            else { token = try await readAccessToken() }
             cachedToken = token
             let result: UsageData
             do {
                 result = try await fetchUsage(token: token)
             } catch FetchError.tokenRejected {
-                // Cached token no longer valid — re-read keychain once and retry.
-                let fresh = try readAccessToken()
+                // Token no longer valid — refresh our own token if we have one,
+                // then re-read from scratch and retry once.
+                await ClaudeAuth.shared.forceRefresh()
+                let fresh = try await readAccessToken()
                 cachedToken = fresh
                 result = try await fetchUsage(token: fresh)
             }
@@ -70,10 +74,12 @@ final class UsageFetcher: ObservableObject {
 
     // MARK: - Credential reading
 
-    private func readAccessToken() throws -> String {
-        // 1. Claude Code desktop app Keychain entry
+    private func readAccessToken() async throws -> String {
+        // 1. ClawdBar's own logged-in token (self-contained, auto-refreshing)
+        if let token = await ClaudeAuth.shared.validAccessToken() { return token }
+        // 2. Claude Code desktop app Keychain entry
         if let token = try? keychainCredentials() { return token }
-        // 2. Standalone CLI credentials file
+        // 3. Standalone CLI credentials file
         if let token = try? cliFileCredentials() { return token }
         throw FetchError.noCredentials
     }

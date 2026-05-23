@@ -1,4 +1,4 @@
-.PHONY: setup generate build run clean release
+.PHONY: setup generate build run clean release dmg
 
 setup:
 	@which xcodegen > /dev/null 2>&1 || brew install xcodegen
@@ -25,16 +25,12 @@ run: build
 clean:
 	rm -rf .build ClawdBar.xcodeproj
 
-release: generate
-	xcodebuild -project ClawdBar.xcodeproj \
-		-scheme ClawdBar \
-		-configuration Release \
-		-archivePath .build/ClawdBar.xcarchive \
-		archive \
-		CODE_SIGN_IDENTITY="Developer ID Application"
-	xcodebuild -exportArchive \
-		-archivePath .build/ClawdBar.xcarchive \
-		-exportPath .build/export \
-		-exportOptionsPlist ExportOptions.plist
-	@echo "✓ App exported to .build/export/ClawdBar.app"
-	@echo "  Next: create DMG, tag release, update Homebrew cask"
+# Ship a release: bump version, commit, tag, push -> CI builds/notarizes/publishes.
+#   make release VERSION=1.2.3
+release:
+	@test -n "$(VERSION)" || { echo "usage: make release VERSION=x.y.z"; exit 1; }
+	@scripts/cut-release.sh $(VERSION)
+
+# Build a local notarized test DMG (does not publish).
+dmg:
+	@scripts/release.sh

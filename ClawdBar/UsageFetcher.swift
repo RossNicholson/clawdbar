@@ -86,28 +86,42 @@ final class UsageFetcher: ObservableObject {
     /// token and getting 401s ("credentials rejected") even though a valid token is
     /// present. So read them all and pick the token with the latest `expiresAt`.
     private func keychainCredentials() throws -> String {
-        let query: [String: Any] = [
+        // There can be more than one "Claude Code-credentials" item (a stale entry
+        // from an old login next to the live one), and they can have DIFFERENT
+        // access permissions. Asking for every item's data at once
+        // (kSecMatchLimitAll + kSecReturnData) fails outright if any one item is
+        // inaccessible — reading nothing. So first enumerate the items by reference
+        // (attributes only, which doesn't touch the protected data), then read each
+        // one's data individually, skip any we can't access, and use the token with
+        // the latest expiresAt.
+        let listQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
-            kSecReturnData as String: true,
+            kSecReturnAttributes as String: true,
+            kSecReturnPersistentRef as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll,
         ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else {
-            throw FetchError.noCredentials
+        var listResult: CFTypeRef?
+        var entries: [[String: Any]] = []
+        if SecItemCopyMatching(listQuery as CFDictionary, &listResult) == errSecSuccess {
+            entries = (listResult as? [[String: Any]]) ?? (listResult as? [String: Any]).map { [$0] } ?? []
         }
-        // A single match comes back as Data; multiple matches as [Data].
-        let blobs: [Data] = (result as? [Data]) ?? (result as? Data).map { [$0] } ?? []
 
         var best: (token: String, expiresAt: Double)?
-        for data in blobs {
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        for entry in entries {
+            guard let ref = entry[kSecValuePersistentRef as String] as? Data else { continue }
+            let dataQuery: [String: Any] = [
+                kSecValuePersistentRef as String: ref,
+                kSecReturnData as String: true,
+            ]
+            var dataResult: CFTypeRef?
+            guard SecItemCopyMatching(dataQuery as CFDictionary, &dataResult) == errSecSuccess,
+                  let data = dataResult as? Data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let oauth = json["claudeAiOauth"] as? [String: Any],
                   let token = oauth["accessToken"] as? String else { continue }
             let expiresAt = (oauth["expiresAt"] as? NSNumber)?.doubleValue ?? 0
-            if best == nil || expiresAt > best!.expiresAt {
-                best = (token, expiresAt)
-            }
+            if best == nil || expiresAt > best!.expiresAt { best = (token, expiresAt) }
         }
         guard let token = best?.token else { throw FetchError.noCredentials }
         return token

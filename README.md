@@ -24,8 +24,11 @@ Instead of hunting through the Claude UI, just glance at your menu bar. ClawdBar
 
 ```bash
 brew tap RossNicholson/tap
+brew trust --cask rossnicholson/tap/clawdbar
 brew install --cask clawdbar
 ```
+
+Homebrew 7 asks you to trust casks from other taps before installing them. On older versions, skip the `brew trust` line.
 
 **Requirements:** macOS 13 Ventura or later · Claude Code installed and signed in (desktop app or CLI)
 

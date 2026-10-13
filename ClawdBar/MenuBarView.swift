@@ -34,7 +34,10 @@ struct MenuBarView: View {
         .liquidGlassBackground(in: Rectangle())
         .onReceive(timer) { now = $0 }
         .sheet(isPresented: $auth.awaitingCode) {
-            LoginCodeView { Task { await fetcher.refresh() } }
+            LoginCodeView {
+                fetcher.resetCredentials()
+                Task { await fetcher.refresh() }
+            }
         }
     }
 

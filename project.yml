@@ -7,7 +7,6 @@ options:
 
 settings:
   base:
-    PRODUCT_NAME: ClawdBar
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "13.0"
     CODE_SIGN_STYLE: Automatic
@@ -31,6 +30,7 @@ targets:
         LSMinimumSystemVersion: "13.0"
     settings:
       base:
+        PRODUCT_NAME: ClawdBar
         PRODUCT_BUNDLE_IDENTIFIER: com.rossnicholson.ClawdBar
         CODE_SIGN_ENTITLEMENTS: ClawdBar/ClawdBar.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -40,3 +40,14 @@ targets:
           CODE_SIGN_IDENTITY: "Developer ID Application"
           DEVELOPMENT_TEAM: "5HQ5V9NP82"
           ENABLE_HARDENED_RUNTIME: YES
+    scheme:
+      testTargets:
+        - ClawdBarTests
+
+  ClawdBarTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: ClawdBarTests
+    dependencies:
+      - target: ClawdBar

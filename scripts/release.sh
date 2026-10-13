@@ -17,7 +17,7 @@ SCHEME="ClawdBar"
 CASK="clawdbar"
 GH_REPO="RossNicholson/clawdbar"
 USE_XCODEGEN=1                 # 1 = regenerate the .xcodeproj from project.yml
-RUN_TESTS=0                    # 1 = run unit tests before archiving
+RUN_TESTS=1                    # 1 = run unit tests before archiving
 DMG_APPLICATIONS_SYMLINK=0     # 1 = add an /Applications symlink in the DMG
 DEVELOPMENT_TEAM=""            # set (non-XcodeGen projects) to sign the archive via args
 # -------------------------

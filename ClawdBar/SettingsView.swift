@@ -120,6 +120,7 @@ struct SettingsView: View {
                         if auth.isLoggedIn {
                             Button("Log out") {
                                 auth.logout()
+                                fetcher.resetCredentials()
                                 Task { await fetcher.refresh() }
                             }
                             .font(.callout).foregroundStyle(.red).buttonStyle(.plain)

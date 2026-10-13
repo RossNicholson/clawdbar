@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.updateStatusTitle()
         }.store(in: &cancellables)
 
+        // Don't read the Keychain or call the API when launched as a unit-test host
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+
         if hasGrantedAccess {
             setupUsagePanel()
             fetcher.start()
@@ -125,6 +128,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func openPanel() {
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
+        // Fresh numbers on open if the last refresh is more than 30 seconds old
+        if hasGrantedAccess, !fetcher.isLoading,
+           (fetcher.lastUpdated.map { Date().timeIntervalSince($0) > 30 } ?? true) {
+            Task { await fetcher.refresh() }
+        }
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.closePanel()
         }
@@ -156,6 +164,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        closePanel()
+        // Wait a tick for the new key window to settle, then stay open if it's
+        // one of ours (the login code sheet or a popover): closing would hide
+        // the sheet you're typing into. Clicking another app leaves us with no
+        // key window, so the panel closes.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.panel.isVisible else { return }
+            if NSApp.modalWindow != nil || NSApp.keyWindow != nil { return }
+            self.closePanel()
+        }
     }
 }

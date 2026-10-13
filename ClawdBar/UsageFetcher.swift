@@ -44,14 +44,17 @@ final class UsageFetcher: ObservableObject {
         }
     }
 
+    /// Forget the cached Claude Code token, e.g. after logging in or out, so the
+    /// next refresh picks the right credentials.
+    func resetCredentials() {
+        cachedToken = nil
+    }
+
     func refresh() async {
         isLoading = true
         lastError = nil
         do {
-            let token: String
-            if let cached = cachedToken { token = cached }
-            else { token = try await readAccessToken() }
-            cachedToken = token
+            let token = try await currentToken()
             let result: UsageData
             do {
                 result = try await fetchUsage(token: token)
@@ -59,9 +62,8 @@ final class UsageFetcher: ObservableObject {
                 // Token no longer valid — refresh our own token if we have one,
                 // then re-read from scratch and retry once.
                 await ClaudeAuth.shared.forceRefresh()
-                let fresh = try await readAccessToken()
-                cachedToken = fresh
-                result = try await fetchUsage(token: fresh)
+                cachedToken = nil
+                result = try await fetchUsage(token: try await currentToken())
             }
             usage = result
             lastUpdated = Date()
@@ -74,14 +76,21 @@ final class UsageFetcher: ObservableObject {
 
     // MARK: - Credential reading
 
-    private func readAccessToken() async throws -> String {
+    /// ClawdBar's own login is checked every time (it's cheap, and refreshes
+    /// itself before expiry), so logging in or out takes effect on the next
+    /// refresh. Only Claude Code's token is cached, to avoid a Keychain read
+    /// every poll.
+    private func currentToken() async throws -> String {
         // 1. ClawdBar's own logged-in token (self-contained, auto-refreshing)
         if let token = await ClaudeAuth.shared.validAccessToken() { return token }
+        if let cached = cachedToken { return cached }
         // 2. Claude Code desktop app Keychain entry
-        if let token = try? keychainCredentials() { return token }
         // 3. Standalone CLI credentials file
-        if let token = try? cliFileCredentials() { return token }
-        throw FetchError.noCredentials
+        guard let token = (try? keychainCredentials()) ?? (try? cliFileCredentials()) else {
+            throw FetchError.noCredentials
+        }
+        cachedToken = token
+        return token
     }
 
     /// Reads the Claude Code OAuth access token from the Keychain.
@@ -136,9 +145,7 @@ final class UsageFetcher: ObservableObject {
     private func cliFileCredentials() throws -> String {
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/.credentials.json")
-        let data = try Data(contentsOf: path)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let token = json["accessToken"] as? String else {
+        guard let token = UsageParse.accessToken(fromCredentialsFile: try Data(contentsOf: path)) else {
             throw FetchError.noCredentials
         }
         return token
@@ -173,22 +180,10 @@ final class UsageFetcher: ObservableObject {
             }
         }
 
-        guard headers.keys.contains(where: { $0.hasPrefix("anthropic-ratelimit-unified") }) else {
+        guard let result = UsageParse.usage(fromHeaders: headers) else {
             throw FetchError.noRateLimitHeaders(statusCode: http.statusCode)
         }
-
-        // Reset values are Unix timestamps in seconds
-        var result = UsageData()
-        result.session5h = headers["anthropic-ratelimit-unified-5h-utilization"].flatMap(Double.init)
-        result.weekly7d = headers["anthropic-ratelimit-unified-7d-utilization"].flatMap(Double.init)
-        result.session5hReset = headers["anthropic-ratelimit-unified-5h-reset"].flatMap(unixDate)
-        result.weekly7dReset = headers["anthropic-ratelimit-unified-7d-reset"].flatMap(unixDate)
-        result.status = headers["anthropic-ratelimit-unified-5h-status"]
         return result
-    }
-
-    private func unixDate(_ s: String) -> Date? {
-        Double(s).map { Date(timeIntervalSince1970: $0) }
     }
 
     // MARK: - Notifications
@@ -199,7 +194,7 @@ final class UsageFetcher: ObservableObject {
             hasNotified7d = false
             return
         }
-        let threshold = Double(UserDefaults.standard.integer(forKey: "notifyThresholdPercent")) / 100.0
+        let threshold = UsageParse.alertThreshold(UserDefaults.standard.object(forKey: "notifyThresholdPercent"))
 
         if let util = result.session5h {
             if util >= threshold && !hasNotified5h {
@@ -248,7 +243,7 @@ final class UsageFetcher: ObservableObject {
             case .tokenRejected:
                 return "Claude credentials were rejected — try signing in again via Claude Code"
             case .noRateLimitHeaders(let code):
-                return "No rate-limit data in response (HTTP \(code)) — Claude Max plan required"
+                return "No usage data in the response (HTTP \(code)) — needs a Claude Pro or Max plan"
             }
         }
     }

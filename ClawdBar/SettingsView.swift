@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @State private var loginItemError: String? = nil
     @State private var checkedUpToDate = false
+    @State private var notificationError: String? = nil
     @AppStorage("notifyEnabled") private var notifyEnabled = false
     @AppStorage("notifyThresholdPercent") private var notifyThresholdPercent = 80
     @AppStorage("refreshInterval") private var refreshInterval = 60.0
@@ -24,6 +25,12 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 settingToggle("Usage alerts", detail: "Notify me when a limit passes \(notifyThresholdPercent)%",
                               isOn: Binding(get: { notifyEnabled }, set: { setNotifications($0) }))
+                if let notificationError {
+                    Text(notificationError)
+                        .font(.mono(9.5))
+                        .foregroundStyle(AppColors.destructive)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if notifyEnabled {
                     HStack(spacing: 10) {
                         Slider(
@@ -92,10 +99,11 @@ struct SettingsView: View {
                 } label: {
                     Text(auth.isLoggedIn ? "Log out" : "Log in")
                         .font(.mono(10, weight: .semibold))
-                        .foregroundStyle(auth.isLoggedIn ? AppColors.ink : .white)
+                        .foregroundStyle(auth.isLoggedIn ? AppColors.ink : AppColors.onSolid)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(auth.isLoggedIn ? AppColors.peach : AppColors.ink, in: Capsule())
+                        // Solid inverts in dark mode, so the button stays visible on a dark card
+                        .background(auth.isLoggedIn ? AppColors.peach : AppColors.solid, in: Capsule())
                 }
                 .buttonStyle(PressableStyle())
             }
@@ -165,9 +173,13 @@ struct SettingsView: View {
     }
 
     private func setNotifications(_ enabled: Bool) {
+        notificationError = nil
         guard enabled else { notifyEnabled = false; return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            DispatchQueue.main.async { notifyEnabled = granted }
+            DispatchQueue.main.async {
+                notifyEnabled = granted
+                if !granted { notificationError = "Allow ClawdBar in System Settings → Notifications." }
+            }
         }
     }
 

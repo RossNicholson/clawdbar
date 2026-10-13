@@ -39,4 +39,22 @@ final class UsageParseTests: XCTestCase {
         XCTAssertEqual(formatTimeRemaining(until: Date().addingTimeInterval(2 * 3600 + 15 * 60 + 30)), "2h 15m")
         XCTAssertEqual(formatTimeRemaining(until: Date().addingTimeInterval(-60)), "0m")
     }
+
+    func testAlertsOncePerLimitWindow() {
+        let reset = Date(timeIntervalSince1970: 1_800_000_000)
+        // First time over the threshold: alert
+        XCTAssertTrue(UsageParse.shouldAlert(usage: 0.82, threshold: 0.8, reset: reset, lastAlertedReset: nil))
+        // Same window (even after a relaunch): don't
+        XCTAssertFalse(UsageParse.shouldAlert(usage: 0.9, threshold: 0.8, reset: reset, lastAlertedReset: reset))
+        // A later window: alert again
+        XCTAssertTrue(UsageParse.shouldAlert(usage: 0.85, threshold: 0.8, reset: reset.addingTimeInterval(5 * 3600), lastAlertedReset: reset))
+        // Under the threshold: never
+        XCTAssertFalse(UsageParse.shouldAlert(usage: 0.5, threshold: 0.8, reset: reset, lastAlertedReset: nil))
+    }
+
+    func testNoUsageMessages() {
+        XCTAssertTrue(UsageParse.noUsageMessage(statusCode: 529).contains("busy"))
+        XCTAssertTrue(UsageParse.noUsageMessage(statusCode: 404).contains("update"))
+        XCTAssertTrue(UsageParse.noUsageMessage(statusCode: 403).contains("Pro or Max"))
+    }
 }

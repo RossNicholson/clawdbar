@@ -18,8 +18,6 @@ final class UsageFetcher: ObservableObject {
     @Published var lastUpdated: Date?
 
     private var timer: Timer?
-    private var hasNotified5h = false
-    private var hasNotified7d = false
     private var cachedToken: String?
 
     func start() {
@@ -51,8 +49,11 @@ final class UsageFetcher: ObservableObject {
     }
 
     func refresh() async {
+        // The timer, opening the panel and the refresh button can all ask at once
+        guard !isLoading else { return }
         isLoading = true
-        lastError = nil
+        // lastError is kept until this refresh finishes, so the error card
+        // doesn't vanish and reappear (resizing the panel) on every retry
         do {
             let token = try await currentToken()
             let result: UsageData
@@ -67,7 +68,10 @@ final class UsageFetcher: ObservableObject {
             }
             usage = result
             lastUpdated = Date()
+            lastError = nil
             checkNotifications(for: result)
+        } catch FetchError.tokenRejected where ClaudeAuth.shared.isLoggedIn {
+            lastError = "ClawdBar's own sign-in was rejected. Log out and back in from Settings."
         } catch {
             lastError = error.localizedDescription
         }
@@ -189,31 +193,22 @@ final class UsageFetcher: ObservableObject {
     // MARK: - Notifications
 
     private func checkNotifications(for result: UsageData) {
-        guard UserDefaults.standard.bool(forKey: "notifyEnabled") else {
-            hasNotified5h = false
-            hasNotified7d = false
-            return
-        }
+        guard UserDefaults.standard.bool(forKey: "notifyEnabled") else { return }
         let threshold = UsageParse.alertThreshold(UserDefaults.standard.object(forKey: "notifyThresholdPercent"))
-
-        if let util = result.session5h {
-            if util >= threshold && !hasNotified5h {
-                hasNotified5h = true
-                notify(id: "5h", title: "5h session at \(Int(util * 100))%",
-                       body: "Your Claude Code 5-hour usage has reached your alert threshold.")
-            } else if util < threshold - 0.1 {
-                hasNotified5h = false
-            }
-        }
-
-        if let util = result.weekly7d {
-            if util >= threshold && !hasNotified7d {
-                hasNotified7d = true
-                notify(id: "7d", title: "7d weekly at \(Int(util * 100))%",
-                       body: "Your Claude Code 7-day usage has reached your alert threshold.")
-            } else if util < threshold - 0.1 {
-                hasNotified7d = false
-            }
+        let limits: [(id: String, usage: Double?, reset: Date?, title: String, body: String)] = [
+            ("5h", result.session5h, result.session5hReset, "5h session",
+             "Your Claude Code 5-hour usage has reached your alert threshold."),
+            ("7d", result.weekly7d, result.weekly7dReset, "7d weekly",
+             "Your Claude Code 7-day usage has reached your alert threshold."),
+        ]
+        for limit in limits {
+            guard let usage = limit.usage else { continue }
+            // Remembered across launches, so restarting ClawdBar doesn't alert again
+            let key = "alertedReset\(limit.id)"
+            let last = (UserDefaults.standard.object(forKey: key) as? Double).map(Date.init(timeIntervalSince1970:))
+            guard UsageParse.shouldAlert(usage: usage, threshold: threshold, reset: limit.reset, lastAlertedReset: last) else { continue }
+            UserDefaults.standard.set((limit.reset ?? Date()).timeIntervalSince1970, forKey: key)
+            notify(id: limit.id, title: "\(limit.title) at \(Int(usage * 100))%", body: limit.body)
         }
     }
 
@@ -243,7 +238,7 @@ final class UsageFetcher: ObservableObject {
             case .tokenRejected:
                 return "Claude credentials were rejected — try signing in again via Claude Code"
             case .noRateLimitHeaders(let code):
-                return "No usage data in the response (HTTP \(code)) — needs a Claude Pro or Max plan"
+                return UsageParse.noUsageMessage(statusCode: code)
             }
         }
     }

@@ -36,4 +36,27 @@ enum UsageParse {
     static func alertThreshold(_ stored: Any?) -> Double {
         Double(stored as? Int ?? 80) / 100
     }
+
+    /// Whether to alert for one limit. Each limit window alerts at most once,
+    /// even across relaunches: `lastAlertedReset` is the reset time of the
+    /// window we last alerted in, and only a clearly later window (over an
+    /// hour later, allowing for jitter) can alert again.
+    static func shouldAlert(usage: Double, threshold: Double, reset: Date?, lastAlertedReset: Date?) -> Bool {
+        guard usage >= threshold else { return false }
+        guard let last = lastAlertedReset else { return true }
+        guard let reset else { return false }
+        return reset.timeIntervalSince(last) > 3600
+    }
+
+    /// What to say when a response carried no usage headers, by HTTP status
+    static func noUsageMessage(statusCode code: Int) -> String {
+        switch code {
+        case 500..<600, 429:
+            return "Anthropic's API is busy right now (HTTP \(code)). ClawdBar will try again."
+        case 404:
+            return "The usage check failed (HTTP 404). ClawdBar may need an update."
+        default:
+            return "No usage data in the response (HTTP \(code)). Usage limits need a Claude Pro or Max plan."
+        }
+    }
 }

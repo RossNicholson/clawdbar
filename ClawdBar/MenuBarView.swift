@@ -285,10 +285,10 @@ struct LoginCodeView: View {
                     Text(auth.working ? "Checking…" : "Log in")
                         .font(.display(17, relativeTo: .headline))
                         .textCase(.uppercase)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.onSolid)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 8)
-                        .background(AppColors.ink, in: Capsule())
+                        .background(AppColors.solid, in: Capsule())
                 }
                 .buttonStyle(PressableStyle())
                 .keyboardShortcut(.defaultAction)

@@ -23,8 +23,8 @@ targets:
       path: ClawdBar/Info.plist
       properties:
         CFBundleDisplayName: ClawdBar
-        CFBundleShortVersionString: "1.0.7"
-        CFBundleVersion: "9"
+        CFBundleShortVersionString: "1.1.0"
+        CFBundleVersion: "10"
         LSUIElement: true
         NSHighResolutionCapable: true
         LSMinimumSystemVersion: "13.0"

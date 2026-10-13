@@ -1,22 +1,38 @@
-# ClawdBar
+<p align="center">
+  <img src="docs/icon.png" alt="ClawdBar icon: a cat raising a paw" width="128" height="128">
+</p>
 
-**A free, open-source macOS menu bar app that shows your Claude Code usage limits at a glance.**
+<h1 align="center">ClawdBar</h1>
 
-![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue) ![Swift 6](https://img.shields.io/badge/Swift-6.0-orange) ![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Free](https://img.shields.io/badge/price-free-brightgreen)
+<p align="center">
+  <strong>Your Claude Code limits, always in view.</strong><br>
+  A Mac menu bar app that shows how much of your 5-hour session and 7-day weekly limits you've used.
+</p>
 
----
+<p align="center">
+  <a href="https://github.com/RossNicholson/clawdbar/releases/latest"><img src="https://img.shields.io/github/v/release/RossNicholson/clawdbar?label=release&color=C3C7F6&labelColor=232428" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-13%2B-F6E2A4?labelColor=232428" alt="macOS 13 or later">
+  <img src="https://img.shields.io/badge/Swift-6-F6C3B4?labelColor=232428" alt="Swift 6">
+  <img src="https://img.shields.io/badge/signed%20%26%20notarized-yes-C2E6D6?labelColor=232428" alt="Signed and notarized">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-DCD2F0?labelColor=232428" alt="MIT licence"></a>
+</p>
 
-Instead of hunting through the Claude UI, just glance at your menu bar. ClawdBar shows your **5-hour session** and **7-day weekly** usage percentages, color-coded so you know at a glance how close you are to hitting your limits.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+    <img src="docs/screenshot-light.png" alt="ClawdBar's panel: 5-hour session at 42% and 7-day weekly at 27%, each with a reset time" width="300">
+  </picture>
+</p>
 
-- **Menu bar** — always-visible `48% · 23%` indicator, green → orange → red as you approach your limit
-- **Popover** — progress bars, exact percentages, and time until each limit resets
-- **Notifications** — optional alerts when you hit a configurable threshold
-- **Auto-refresh** — configurable polling (30s / 1 min / 5 min)
-- **Auto-update** — Homebrew-based update checks
-- **Launch at login** — runs silently from startup
-- 100% native SwiftUI · no Electron · no telemetry · Liquid Glass UI on macOS 26 Tahoe
-
-> **Requires a Claude subscription with usage limits** (Pro or Max). The unified rate-limit headers that ClawdBar reads are returned for plans that have token-based rate limits.
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#privacy">Privacy</a> ·
+  <a href="#faq">FAQ</a> ·
+  <a href="#build-from-source">Build</a> ·
+  <a href="https://rossnicholson.dev/clawdbar">Website</a>
+</p>
 
 ---
 
@@ -28,78 +44,111 @@ brew trust --cask rossnicholson/tap/clawdbar
 brew install --cask clawdbar
 ```
 
-Homebrew 7 asks you to trust casks from other taps before installing them. On older versions, skip the `brew trust` line.
+Homebrew 7 asks you to trust casks from other taps before installing them. On older versions of Homebrew, skip the `brew trust` line.
 
-**Requirements:** macOS 13 Ventura or later · Claude Code installed and signed in (desktop app or CLI)
+Open ClawdBar, then click **Allow access & continue**. macOS asks once for permission to read your Claude Code sign-in from the Keychain.
+
+**Requirements:** macOS 13 Ventura or later · [Claude Code](https://claude.com/product/claude-code) installed and signed in · a Claude Pro or Max plan
+
+### Updating
+
+Open **Settings → Check for updates → Update ClawdBar**, and it quits, updates and reopens on its own. You can also run `brew upgrade --cask clawdbar` in Terminal.
+
+> **On ClawdBar 1.0.6 or earlier with Homebrew 7?** If *Update ClawdBar* doesn't work, update once from Terminal:
+> ```bash
+> brew upgrade --cask rossnicholson/tap/clawdbar
+> ```
+
+---
+
+## Features
+
+- **In your menu bar:** two numbers, like `42% · 27%`, for your 5-hour session and 7-day weekly usage. They're coloured green, then orange from 50%, then red from 80%.
+- **At a glance:** click for a colour-block card per limit (mint, then butter, then peach), with the exact percentage, a progress bar and when it resets.
+- **Usage alerts:** an optional notification when a limit passes your threshold (50–95%, 80% by default). Each limit alerts once until it drops back down.
+- **Your pace:** check every 30 seconds, every minute or every 5 minutes.
+- **Its own sign-in, if you want it:** ClawdBar normally uses Claude Code's sign-in. You can also log in with Claude directly, so it keeps working when Claude Code's session expires.
+- **Launch at login,** light and dark mode, VoiceOver support, and a small cat who waves hello.
+- **Native SwiftUI,** with no Electron.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/busy.png" alt="Busy day: session at 86% in peach, weekly at 64% in butter" width="200"><br><sub><b>Busy day</b></sub></td>
+    <td align="center"><img src="docs/settings.png" alt="Settings: usage alerts, refresh interval, launch at login, Claude account, updates" width="190"><br><sub><b>Settings</b></sub></td>
+    <td align="center"><img src="docs/welcome.png" alt="Welcome screen explaining how ClawdBar works" width="200"><br><sub><b>First launch</b></sub></td>
+  </tr>
+</table>
 
 ---
 
 ## How it works
 
-On first launch ClawdBar explains what it needs and asks you to approve. Here's the full picture:
+1. **Your sign-in.** ClawdBar reads the Claude Code sign-in saved in your Mac's Keychain (the `Claude Code-credentials` entry the Claude Code app and CLI create). If you've logged in with ClawdBar itself, it uses that instead. It never changes Claude Code's sign-in.
+2. **A tiny check.** At your chosen interval, ClawdBar sends Anthropic's API the smallest request it can (one token, to the Haiku model). It then reads the usage figures Anthropic returns alongside it, in the `anthropic-ratelimit-unified-*` headers. Each check uses a sliver of your limits, about as much as typing "hi".
+3. **The numbers.** Those headers give the share of each limit you've used and when it resets. That's everything ClawdBar shows.
 
-1. **Credentials** — ClawdBar reads your Claude Code session token from the `Claude Code-credentials` entry in your macOS Keychain. This is written by the Claude Code desktop app and CLI — ClawdBar never creates, modifies, or stores credentials itself.
-
-2. **Usage check** — At the configured interval (default: every 60 seconds) it makes a minimal API call to `api.anthropic.com/v1/messages` (1 token of Haiku) and reads the `anthropic-ratelimit-unified-*` response headers. No conversation data is sent or stored.
-
-3. **Keychain access** — On signed/notarized builds, macOS shows its standard Keychain access dialog on first use. You can revoke this at any time in **Keychain Access → File → Lock Keychains**.
+ClawdBar's own sign-in uses the same sign-in flow as Claude Code. Anthropic doesn't document it, so a change on their side could mean ClawdBar needs an update.
 
 ---
 
-## Settings
+## Privacy
 
-Click the gear icon in the popover to open Settings:
+ClawdBar collects nothing: no analytics, no accounts of its own, no tracking.
+- Your sign-in stays in your Keychain and is only ever sent to Anthropic.
+- The only servers it talks to are Anthropic's: `api.anthropic.com` for your usage, plus Claude's sign-in pages if you use ClawdBar's own login.
+- Updates go through Homebrew, as they do in Terminal.
 
-| Setting | Description |
-|---|---|
-| **Check for updates** | Manually check for a new version via Homebrew |
-| **Launch at login** | Start ClawdBar silently at system login |
-| **Notifications** | Enable usage alerts with a configurable threshold (50–95%) |
-| **Refresh interval** | How often to poll the API: 30 seconds, 1 minute (default), or 5 minutes |
+---
+
+## FAQ
+
+**It says "No usage data in the response".**
+Usage limits come from Claude Pro and Max plans. On a plan without them (for example API credits only), Anthropic doesn't send the figures ClawdBar reads.
+
+**It says my credentials were rejected.**
+Claude Code's session has expired. Open Claude Code to refresh it, or click **Log in** in ClawdBar to give it a sign-in of its own.
+
+**Can I change how often it checks?**
+Yes: **Settings → Refresh every**. Fewer checks use even less of your limits.
+
+**How do I uninstall it?**
+Run `brew uninstall --cask clawdbar`. Add `--zap` to remove its settings too.
 
 ---
 
 ## Build from source
 
 ```bash
-git clone https://github.com/RossNicholson/clawdbar
+git clone https://github.com/RossNicholson/clawdbar.git
 cd clawdbar
-make setup   # installs xcodegen if needed, generates the .xcodeproj
+make setup   # installs xcodegen if needed and generates the .xcodeproj
 make run     # builds and launches
 ```
 
-No `.xcodeproj` is checked in — regenerate it any time with `xcodegen generate`.
+The `.xcodeproj` isn't checked in. It's generated from `project.yml`, so run `make generate` after adding files.
 
-For a signed release build, pass your Apple Developer Team ID:
+| Command | What it does |
+|---|---|
+| `make test` | Run the unit tests |
+| `make dmg` | Build a local signed and notarized DMG (doesn't publish) |
+| `make release VERSION=x.y.z` | Ship a release; see [RELEASING.md](RELEASING.md) |
 
-```bash
-make release TEAM_ID=XXXXXXXXXX
-```
-
----
-
-## Privacy
-
-- No analytics, no telemetry, no external services beyond `api.anthropic.com`
-- Credentials are read-only from your existing Keychain entry and never transmitted
-- All data stays on-device
-
----
-
-## Contributing
-
-Bug reports, feature requests, and PRs are welcome — open an issue or start a discussion.
+Bug reports, feature ideas and pull requests are welcome. [Open an issue](https://github.com/RossNicholson/clawdbar/issues) to start.
 
 ---
 
 ## Support
 
-If you find ClawdBar useful, consider [buying me a coffee](https://buymeacoffee.com/rossnicholson) ☕
+ClawdBar is made by [Ross Nicholson](https://rossnicholson.dev), who also makes [BrewDock](https://github.com/RossNicholson/brewdock). For help, see the [support page](https://rossnicholson.dev/support) or email support@rossnicholson.dev.
 
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20Ross-yellow?logo=buy-me-a-coffee)](https://buymeacoffee.com/rossnicholson)
+If ClawdBar helps you pace your day, you can [buy me a coffee](https://buymeacoffee.com/rossnicholson) ☕
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20Ross-F6E2A4?logo=buy-me-a-coffee&labelColor=232428)](https://buymeacoffee.com/rossnicholson)
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).
+
+The bundled fonts, Barlow Condensed and Geist Mono, are under the SIL Open Font License (see `ClawdBar/Fonts`). ClawdBar is an independent app and isn't affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.

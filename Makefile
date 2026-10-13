@@ -1,4 +1,4 @@
-.PHONY: setup generate build run clean release dmg
+.PHONY: setup generate build run test clean release dmg
 
 setup:
 	@which xcodegen > /dev/null 2>&1 || brew install xcodegen
@@ -21,6 +21,11 @@ build: generate
 
 run: build
 	open .build/Build/Products/Debug/ClawdBar.app
+
+# Run the unit tests.
+test: generate
+	xcodebuild test -project ClawdBar.xcodeproj -scheme ClawdBar \
+		-destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -quiet
 
 clean:
 	rm -rf .build ClawdBar.xcodeproj

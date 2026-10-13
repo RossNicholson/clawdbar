@@ -2,10 +2,10 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var fetcher: UsageFetcher
+    @EnvironmentObject var selfUpdater: SelfUpdater
     @ObservedObject private var auth = ClaudeAuth.shared
     @State private var now = Date()
     @State private var showingSettings = false
-    @State private var showingHelp = false
     @State private var showingAbout = false
 
     let timer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
@@ -13,25 +13,25 @@ struct MenuBarView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().opacity(dividerOpacity)
-            usageRow(
-                label: "5h Session",
-                ratio: fetcher.usage.session5h,
-                resetDate: fetcher.usage.session5hReset,
-                now: now
-            )
-            Divider().opacity(dividerOpacity)
-            usageRow(
-                label: "7d Weekly",
-                ratio: fetcher.usage.weekly7d,
-                resetDate: fetcher.usage.weekly7dReset,
-                now: now
-            )
-            Divider().opacity(dividerOpacity)
+            VStack(spacing: 8) {
+                UsageCard(title: "5-hour session",
+                          ratio: fetcher.usage.session5h,
+                          resetDate: fetcher.usage.session5hReset,
+                          now: now)
+                UsageCard(title: "7-day weekly",
+                          ratio: fetcher.usage.weekly7d,
+                          resetDate: fetcher.usage.weekly7dReset,
+                          now: now)
+                if let err = fetcher.lastError {
+                    errorCard(err)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 12)
             footer
         }
-        .frame(width: 280)
-        .liquidGlassBackground(in: Rectangle())
+        .frame(width: 300)
+        .background(AppColors.ground)
         .onReceive(timer) { now = $0 }
         .sheet(isPresented: $auth.awaitingCode) {
             LoginCodeView {
@@ -41,282 +41,200 @@ struct MenuBarView: View {
         }
     }
 
-    private var dividerOpacity: Double {
-        if #available(macOS 26, *) { return 0.25 }
-        return 1.0
-    }
-
     // MARK: - Header
 
     private var header: some View {
-        HStack {
-            Image(systemName: "pawprint.fill")
-                .foregroundStyle(.purple)
-                .font(.subheadline)
-            Text("ClawdBar")
-                .font(.headline)
-            Spacer()
+        HStack(alignment: .center, spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("ClawdBar")
+                    .font(.display(30, relativeTo: .largeTitle))
+                    .textCase(.uppercase)
+                    .foregroundStyle(AppColors.text)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Claude Code usage")
+                    .font(.mono(10))
+                    .foregroundStyle(AppColors.secondaryText)
+            }
+            Spacer(minLength: 8)
             if fetcher.isLoading {
-                ProgressView().scaleEffect(0.6)
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 26, height: 26)
             } else {
-                refreshButton
-            }
-            helpButton
-            aboutButton
-            settingsButton
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    }
-
-    // MARK: - Usage rows
-
-    private func usageRow(label: String, ratio: Double?, resetDate: Date?, now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(label)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(ratio.map { "\(Int($0 * 100))%" } ?? "—")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(ratio.map { usageColor($0) } ?? .secondary)
-            }
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(.quaternary)
-                        .frame(height: 6)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(ratio.map { usageColor($0) } ?? .secondary)
-                        .frame(width: geo.size.width * (ratio ?? 0), height: 6)
-                        .animation(.easeInOut, value: ratio)
+                HeaderIconButton(symbol: "arrow.clockwise", help: "Refresh") {
+                    Task { await fetcher.refresh() }
                 }
             }
-            .frame(height: 6)
-
-            if let reset = resetDate {
-                Text("Resets in \(formatTimeRemaining(until: reset))")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            HeaderIconButton(symbol: "gearshape", help: "Settings") {
+                showingSettings.toggle()
+            }
+            .popover(isPresented: $showingSettings, arrowEdge: .bottom) {
+                SettingsView()
+                    .environmentObject(fetcher)
+                    .environmentObject(selfUpdater)
+            }
+            HeaderIconButton(symbol: "info", help: "About & help") {
+                showingAbout.toggle()
+            }
+            .popover(isPresented: $showingAbout, arrowEdge: .bottom) {
+                aboutView
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
     }
 
-    private func usageColor(_ ratio: Double) -> Color {
-        switch ratio {
-        case ..<0.5:  return .green
-        case ..<0.8:  return .orange
-        default:      return .red
+    // MARK: - Error
+
+    private func errorCard(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.top, 1)
+            Text(message)
+                .font(.mono(10))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !auth.isLoggedIn {
+                Button { auth.beginLogin() } label: {
+                    Text("Log in")
+                        .font(.mono(10, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(AppColors.ink, in: Capsule())
+                }
+                .buttonStyle(PressableStyle())
+            }
         }
+        .foregroundStyle(AppColors.ink)
+        .padding(12)
+        .background(AppColors.coral, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: - Footer
 
     private var footer: some View {
         HStack {
-            if let err = fetcher.lastError {
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-                    .font(.caption2)
-                Text(err)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .lineLimit(1)
-            } else if let updated = fetcher.lastUpdated {
-                Text("Updated \(updated, style: .relative) ago")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else {
-                Text("Loading…")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            Group {
+                if let updated = fetcher.lastUpdated {
+                    Text("Updated \(updated, style: .relative) ago")
+                } else if fetcher.lastError == nil {
+                    Text("Loading…")
+                } else {
+                    Text("Couldn't load usage")
+                }
             }
+            .font(.mono(9.5))
+            .foregroundStyle(AppColors.secondaryText)
             Spacer()
-            if fetcher.lastError != nil {
-                Button("Log in") { auth.beginLogin() }
-                    .font(.caption)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.purple)
-            }
             Button("Quit") { NSApplication.shared.terminate(nil) }
-                .font(.caption)
+                .font(.mono(9.5, weight: .semibold))
+                .textCase(.uppercase)
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppColors.text)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    // MARK: - Header buttons
-
-    private var refreshButton: some View {
-        Button {
-            Task { await fetcher.refresh() }
-        } label: {
-            Image(systemName: "arrow.clockwise")
-                .font(.footnote)
-                .padding(6)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .liquidGlassInteractive(in: Circle())
-    }
-
-    private var helpButton: some View {
-        Button { showingHelp.toggle() } label: {
-            Image(systemName: "questionmark.circle")
-                .font(.footnote)
-                .padding(6)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .liquidGlassInteractive(in: Circle())
-        .popover(isPresented: $showingHelp, arrowEdge: .top) {
-            helpView
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .overlay(alignment: .top) {
+            Rectangle().fill(AppColors.hairline).frame(height: 1)
         }
     }
 
-    private var aboutButton: some View {
-        Button { showingAbout.toggle() } label: {
-            Image(systemName: "info.circle")
-                .font(.footnote)
-                .padding(6)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .liquidGlassInteractive(in: Circle())
-        .popover(isPresented: $showingAbout, arrowEdge: .top) {
-            aboutView
-        }
-    }
-
-    private var settingsButton: some View {
-        Button { showingSettings.toggle() } label: {
-            Image(systemName: "gearshape")
-                .font(.footnote)
-                .padding(6)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .liquidGlassInteractive(in: Circle())
-        .popover(isPresented: $showingSettings, arrowEdge: .top) {
-            SettingsView()
-        }
-    }
-
-    // MARK: - Help popover
-
-    private var helpView: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 6) {
-                Image(systemName: "lifepreserver")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.blue)
-                Text("Help & Support")
-                    .font(.title3).fontWeight(.semibold)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Found a bug or need help? Visit the support page or drop us an email — we read everything.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Feature requests and feedback are always welcome too.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(spacing: 10) {
-                Link(destination: URL(string: "https://rossnicholson.dev/support")!) {
-                    Label("Support Page", systemImage: "globe")
-                        .font(.caption)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
-                .liquidGlassInteractive(in: Capsule())
-
-                Link(destination: URL(string: "mailto:support@rossnicholson.dev")!) {
-                    Label("support@rossnicholson.dev", systemImage: "envelope")
-                        .font(.caption)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .liquidGlassInteractive(in: Capsule())
-            }
-        }
-        .padding(20)
-        .frame(width: 240)
-    }
-
-    // MARK: - About popover
+    // MARK: - About & help
 
     private var aboutView: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 6) {
-                Image(systemName: "pawprint.fill")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.purple)
-                Text("ClawdBar")
-                    .font(.title3).fontWeight(.semibold)
-                Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                PopoverHeader(
+                    title: "ClawdBar",
+                    subtitle: "Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")\nMade by Ross Nicholson"
+                )
+                Mascot(size: 56)
             }
 
-            Divider()
-
-            VStack(spacing: 8) {
-                Text("Made by Ross Nicholson")
-                    .font(.subheadline)
-                Link("rossnicholson.dev", destination: URL(string: "https://rossnicholson.dev")!)
-                    .font(.caption)
-                Link(destination: URL(string: "https://github.com/RossNicholson/clawdbar")!) {
-                    Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
-                        .font(.caption)
-                }
+            ColorBlockButton(title: "Get help", detail: "Bugs, questions and feature requests", fill: AppColors.mint) {
+                NSWorkspace.shared.open(URL(string: "https://rossnicholson.dev/support")!)
+            }
+            ColorBlockButton(title: "Email support", detail: "support@rossnicholson.dev", fill: AppColors.periwinkle, symbol: "envelope.fill") {
+                NSWorkspace.shared.open(URL(string: "mailto:support@rossnicholson.dev")!)
+            }
+            ColorBlockButton(title: "Buy me a coffee", detail: "If ClawdBar helps you pace your day", fill: AppColors.peach, symbol: "cup.and.saucer.fill") {
+                NSWorkspace.shared.open(URL(string: "https://buymeacoffee.com/rossnicholson")!)
             }
 
-            Divider()
-
-            VStack(spacing: 4) {
-                Text("If you find ClawdBar helpful:")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Link(destination: URL(string: "https://buymeacoffee.com/rossnicholson")!) {
-                    Label("Buy Me a Coffee", systemImage: "cup.and.saucer.fill")
-                        .font(.caption)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.orange)
-                .liquidGlassInteractive(in: Capsule())
+            HStack(spacing: 10) {
+                MonoLink(title: "Website", destination: URL(string: "https://rossnicholson.dev")!)
+                MonoLink(title: "GitHub", destination: URL(string: "https://github.com/RossNicholson/clawdbar")!)
+                MonoLink(title: "Terms", destination: URL(string: "https://rossnicholson.dev/terms")!)
+                MonoLink(title: "Privacy", destination: URL(string: "https://rossnicholson.dev/privacy")!)
             }
-
-            Divider()
-
-            HStack(spacing: 12) {
-                Link("Terms & Conditions", destination: URL(string: "https://rossnicholson.dev/terms")!)
-                Text("·").foregroundStyle(.tertiary)
-                Link("Privacy Policy", destination: URL(string: "https://rossnicholson.dev/privacy")!)
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+            .padding(.top, 2)
         }
-        .padding(20)
-        .frame(width: 220)
+        .popoverChrome()
+    }
+}
+
+/// One usage limit as a colour block: mint when there's plenty left, butter
+/// from 50%, peach from 80%. Text is always ink on the pastel.
+struct UsageCard: View {
+    let title: String
+    let ratio: Double?
+    let resetDate: Date?
+    let now: Date
+
+    static func fill(for ratio: Double?) -> Color {
+        guard let ratio else { return AppColors.surface }
+        switch ratio {
+        case ..<0.5: return AppColors.mint
+        case ..<0.8: return AppColors.butter
+        default: return AppColors.peach
+        }
+    }
+
+    var body: some View {
+        let ink = ratio == nil ? AppColors.text : AppColors.ink
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.display(19, relativeTo: .headline))
+                        .textCase(.uppercase)
+                    Text(resetDate.map { _ in "Resets in \(formatTimeRemaining(until: resetDate!))" } ?? "Waiting for data")
+                        .font(.mono(9.5))
+                        .opacity(0.7)
+                }
+                Spacer()
+                Text(ratio.map { "\(Int($0 * 100))%" } ?? "–")
+                    .font(.display(42, relativeTo: .largeTitle))
+                    .monospacedDigit()
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(ink.opacity(0.14))
+                    Capsule().fill(ink)
+                        .frame(width: max(8, geo.size.width * min(1, ratio ?? 0)))
+                        .opacity(ratio == nil ? 0 : 1)
+                        .animation(.easeInOut, value: ratio)
+                }
+            }
+            .frame(height: 8)
+        }
+        .foregroundStyle(ink)
+        .padding(14)
+        .background(Self.fill(for: ratio), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(accessibilityValue)
+        .id(now)   // re-render the countdown when the 30-second timer ticks
+    }
+
+    private var accessibilityValue: String {
+        guard let ratio else { return "no data yet" }
+        var text = "\(Int(ratio * 100)) percent used"
+        if let resetDate { text += ", resets in \(formatTimeRemaining(until: resetDate))" }
+        return text
     }
 }
 
@@ -328,40 +246,56 @@ struct LoginCodeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Image(systemName: "pawprint.fill").foregroundStyle(.purple)
-                Text("Log in with Claude").font(.headline)
+            HStack(alignment: .top) {
+                PopoverHeader(title: "Log in with Claude",
+                              subtitle: "Your browser opened to authorise ClawdBar. Once you approve, copy the code it shows and paste it here.")
+                Mascot(size: 48, disc: AppColors.periwinkle)
             }
-            Text("Your browser opened to authorize ClawdBar. After you approve, copy the code shown on that page and paste it here.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
-            TextField("Paste authorization code", text: $code)
-                .textFieldStyle(.roundedBorder)
+            TextField("Paste the code", text: $code)
+                .textFieldStyle(.plain)
+                .font(.mono(12))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .disableAutocorrection(true)
 
             if let err = auth.loginError {
                 Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(.mono(10))
+                    .foregroundStyle(AppColors.ink)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppColors.coral, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack {
                 Button("Cancel") { auth.cancelLogin() }
+                    .font(.mono(11, weight: .medium))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(AppColors.secondaryText)
                 Spacer()
-                Button(auth.working ? "Verifying…" : "Complete Login") {
+                Button {
                     Task {
                         await auth.completeLogin(pasted: code)
                         if auth.isLoggedIn { onSuccess() }
                     }
+                } label: {
+                    Text(auth.working ? "Checking…" : "Log in")
+                        .font(.display(17, relativeTo: .headline))
+                        .textCase(.uppercase)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(AppColors.ink, in: Capsule())
                 }
+                .buttonStyle(PressableStyle())
                 .keyboardShortcut(.defaultAction)
                 .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty || auth.working)
+                .opacity(code.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
             }
         }
-        .padding(20)
-        .frame(width: 360)
+        .popoverChrome(width: 360)
     }
 }

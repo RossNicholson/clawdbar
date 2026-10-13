@@ -29,6 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         fetcher.$usage.receive(on: RunLoop.main).sink { [weak self] (_: UsageData) in
             self?.updateStatusTitle()
         }.store(in: &cancellables)
+        // The panel fits its content; an error card appearing or clearing changes it
+        fetcher.$lastError.receive(on: RunLoop.main).sink { [weak self] _ in
+            DispatchQueue.main.async { self?.fitPanelToContent() }
+        }.store(in: &cancellables)
 
         // Don't read the Keychain or call the API when launched as a unit-test host
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
@@ -67,9 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: - Panel setup
 
-    private func makePanel(height: CGFloat) -> NSPanel {
+    private func makePanel(for content: NSView) -> NSPanel {
         let p = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: height),
+            contentRect: NSRect(origin: .zero, size: content.fittingSize),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -95,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         let hostingView = NSHostingView(rootView: content)
         hostingView.autoresizingMask = [.width, .height]
-        panel = makePanel(height: 320)
+        panel = makePanel(for: hostingView)
         panel.contentView = hostingView
     }
 
@@ -105,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .environmentObject(selfUpdater)
         let hostingView = NSHostingView(rootView: content)
         hostingView.autoresizingMask = [.width, .height]
-        panel = makePanel(height: 220)
+        panel = makePanel(for: hostingView)
         panel.contentView = hostingView
     }
 
@@ -125,7 +129,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if panel.isVisible { closePanel() } else { openPanel() }
     }
 
+    /// Resize the panel to its SwiftUI content, keeping it hanging from the menu bar
+    private func fitPanelToContent() {
+        guard let panel, let content = panel.contentView else { return }
+        let size = content.fittingSize
+        guard size != panel.frame.size, size.width > 0, size.height > 0 else { return }
+        panel.setContentSize(size)
+        if panel.isVisible { positionPanel() }
+    }
+
     private func openPanel() {
+        fitPanelToContent()
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
         // Fresh numbers on open if the last refresh is more than 30 seconds old

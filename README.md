@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Your Claude Code limits, always in view.</strong><br>
-  A Mac menu bar app that shows how much of your 5-hour session and 7-day weekly limits you've used.
+  A free, open-source Mac menu bar app that shows how much of your Claude Code usage limits you've used: your 5-hour session and 7-day weekly limits, with reset times.
 </p>
 
 <p align="center">
@@ -101,6 +101,9 @@ ClawdBar collects nothing: no analytics, no accounts of its own, no tracking.
 ---
 
 ## FAQ
+
+**How is it different from Claude Code's `/usage` command or ccusage?**
+`/usage` shows the same limits, but only inside a Claude Code session. ClawdBar keeps them in your menu bar all the time, and can alert you before you hit one. Tools like ccusage add up token counts from Claude Code's local logs. ClawdBar shows the percentages Anthropic itself reports for your Pro or Max plan.
 
 **It says "No usage data in the response".**
 Usage limits come from Claude Pro and Max plans. On a plan without them (for example API credits only), Anthropic doesn't send the figures ClawdBar reads.

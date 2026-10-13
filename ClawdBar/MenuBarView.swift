@@ -81,7 +81,7 @@ struct MenuBarView: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.top, 14)
+        .padding(.top, 2)   // the panel's hidden title bar already adds space above
         .padding(.bottom, 12)
     }
 

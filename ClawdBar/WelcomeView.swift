@@ -32,7 +32,11 @@ struct WelcomeView: View {
             }
             .padding(.top, 2)
         }
-        .popoverChrome(width: 300)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 18)
+        .padding(.top, 2)   // the panel's hidden title bar already adds space above
+        .frame(width: 300)
+        .background(AppColors.ground)
     }
 
     private func infoCard(title: String, fill: Color, text: String) -> some View {

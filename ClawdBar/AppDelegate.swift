@@ -51,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func updateStatusTitle() {
         guard let button = statusItem.button else { return }
+        // Before access is granted there's no usage yet; keep the paw
+        guard hasGrantedAccess else { button.title = "🐾"; return }
         let s = fetcher.usage.session5h.map { "\(Int($0 * 100))%" } ?? "–"
         let w = fetcher.usage.weekly7d.map { "\(Int($0 * 100))%" } ?? "–"
 

@@ -152,7 +152,14 @@ URL="https://github.com/$GH_REPO/releases/download/v$VERSION/$APP-$VERSION.dmg"
 curl -sSL -o "$TMP/dl.dmg" "$URL" || fail "could not download the published asset"
 DL_SHA="$(shasum -a 256 "$TMP/dl.dmg" | awk '{print $1}')"
 [[ "$DL_SHA" == "$SHA" ]] || fail "published asset sha256 ($DL_SHA) != cask sha256 ($SHA)"
-xcrun stapler validate "$TMP/dl.dmg" >/dev/null || fail "published asset is not stapled/notarized"
+# stapler validate can fail transiently on CI (it did for v1.1.1, whose asset
+# was fine), so retry like the pre-publish check
+for attempt in 1 2 3 4 5; do
+  xcrun stapler validate "$TMP/dl.dmg" >/dev/null 2>&1 && break
+  [[ "$attempt" -eq 5 ]] && fail "published asset is not stapled/notarized"
+  echo "published asset validation failed, retrying in 15s ($attempt/5)"
+  sleep 15
+done
 rm -rf "$TMP"
 
 step "Published v$VERSION ✅  (downloaded asset matches sha256 and is notarized)"

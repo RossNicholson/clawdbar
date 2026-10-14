@@ -166,6 +166,9 @@ struct SettingsView: View {
 
     private var accountStatus: String {
         if auth.isLoggedIn { return "Signed in with ClawdBar's own login" }
+        if auth.signInExpired && fetcher.lastError == nil {
+            return "ClawdBar's own sign-in expired, so it's using Claude Code's. Log in to make it independent again."
+        }
         if fetcher.lastError == nil && fetcher.lastUpdated != nil {
             return "Using Claude Code's sign-in. Log in to make ClawdBar independent of it."
         }

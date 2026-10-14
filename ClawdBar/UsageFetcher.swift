@@ -60,41 +60,66 @@ final class UsageFetcher: ObservableObject {
             do {
                 result = try await fetchUsage(token: token)
             } catch FetchError.tokenRejected {
-                // Token no longer valid — refresh our own token if we have one,
-                // then re-read from scratch and retry once.
-                await ClaudeAuth.shared.forceRefresh()
+                // Token no longer valid — renew our own login if we have one,
+                // or re-read Claude Code's from scratch, and retry once.
                 cachedToken = nil
-                result = try await fetchUsage(token: try await currentToken())
+                result = try await fetchUsage(token: try await currentToken(forceRefresh: true))
             }
             usage = result
             lastUpdated = Date()
             lastError = nil
             checkNotifications(for: result)
-        } catch FetchError.tokenRejected where ClaudeAuth.shared.isLoggedIn {
-            lastError = "ClawdBar's own sign-in was rejected. Log out and back in from Settings."
         } catch {
-            lastError = error.localizedDescription
+            lastError = message(for: error)
         }
         isLoading = false
     }
 
     // MARK: - Credential reading
 
-    /// ClawdBar's own login is checked every time (it's cheap, and refreshes
+    /// ClawdBar's own login is checked every time (it's cheap, and renews
     /// itself before expiry), so logging in or out takes effect on the next
-    /// refresh. Only Claude Code's token is cached, to avoid a Keychain read
-    /// every poll.
-    private func currentToken() async throws -> String {
-        // 1. ClawdBar's own logged-in token (self-contained, auto-refreshing)
-        if let token = await ClaudeAuth.shared.validAccessToken() { return token }
+    /// refresh. If it can't give a token right now, Claude Code's is used
+    /// instead, so a renewal hiccup doesn't interrupt anything. Only Claude
+    /// Code's token is cached, to avoid a Keychain read every poll.
+    private func currentToken(forceRefresh: Bool = false) async throws -> String {
+        // 1. ClawdBar's own logged-in token (self-contained, auto-renewing)
+        var ownError: Error?
+        do {
+            if let token = try await ClaudeAuth.shared.validAccessToken(forceRefresh: forceRefresh) { return token }
+        } catch {
+            ownError = error
+        }
         if let cached = cachedToken { return cached }
         // 2. Claude Code desktop app Keychain entry
         // 3. Standalone CLI credentials file
         guard let token = (try? keychainCredentials()) ?? (try? cliFileCredentials()) else {
-            throw FetchError.noCredentials
+            throw ownError ?? FetchError.noCredentials
         }
         cachedToken = token
         return token
+    }
+
+    /// Sign-in problems are explained by ClawdBar's own login state when it has
+    /// one: only an expired login asks the user to act; a failed renewal just
+    /// says it will retry.
+    private func message(for error: Error) -> String {
+        let auth = ClaudeAuth.shared
+        switch error {
+        case FetchError.tokenRejected, FetchError.noCredentials, is ClaudeAuth.AuthError:
+            if auth.signInExpired {
+                return "ClawdBar's sign-in has expired. Log in again to keep usage updating."
+            }
+            if let renewError = auth.lastRefreshError {
+                return "Couldn't renew ClawdBar's sign-in (\(renewError)). ClawdBar will try again."
+            }
+            if case FetchError.tokenRejected = error, auth.isLoggedIn {
+                return "ClawdBar's own sign-in was rejected. Log out and back in from Settings."
+            }
+        default:
+            break
+        }
+        return error.localizedDescription
     }
 
     /// Reads the Claude Code OAuth access token from the Keychain.

@@ -2,6 +2,7 @@ import Foundation
 import Security
 import AppKit
 import CryptoKit
+import os
 
 /// Self-contained Claude sign-in for ClawdBar.
 ///
@@ -23,14 +24,30 @@ final class ClaudeAuth: ObservableObject {
     @Published var awaitingCode = false      // browser opened, waiting for the user to paste the code
     @Published var working = false           // exchanging/refreshing
     @Published var loginError: String?
+    /// The saved login was revoked or expired (the server said invalid_grant),
+    /// so ClawdBar signed out and needs a fresh login.
+    @Published var signInExpired = false
+    /// Why the last renewal failed, if it did. Cleared by the next success.
+    @Published var lastRefreshError: String?
 
     private var pendingVerifier: String?
     private var pendingState: String?
 
+    // One renewal at a time: each refresh token can be used only once, so two
+    // overlapping renewals would leave one holding a spent token.
+    private var refreshTask: Task<Creds, Error>?
+    // After a temporary failure (offline, rate limited), wait before trying
+    // again rather than hitting the token server on every poll.
+    private var retryDelay: TimeInterval = 0
+    private var retryNotBefore = Date.distantPast
+    private var lastRetryableError: Error?
+
+    private let logger = Logger(subsystem: "com.rossnicholson.ClawdBar", category: "auth")
+
     // Claude Code's public OAuth client + endpoints.
     private let clientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     private let authorizeURL = "https://claude.ai/oauth/authorize"
-    private let tokenURL = "https://console.anthropic.com/v1/oauth/token"
+    private let tokenURL = "https://platform.claude.com/v1/oauth/token"
     private let redirectURI = "https://console.anthropic.com/oauth/code/callback"
     private let scopes = "org:create_api_key user:profile user:inference"
 
@@ -88,9 +105,13 @@ final class ClaudeAuth: ObservableObject {
             ])
             try store(creds)
             isLoggedIn = true
+            signInExpired = false
+            clearRetryState()
             awaitingCode = false
             pendingVerifier = nil
             pendingState = nil
+        } catch AuthError.signInExpired {
+            loginError = "Login failed: that code is invalid or has expired. Please start again."
         } catch {
             loginError = "Login failed: \(error.localizedDescription)"
         }
@@ -106,39 +127,80 @@ final class ClaudeAuth: ObservableObject {
     func logout() {
         Self.deleteStored(service: service, account: account)
         isLoggedIn = false
+        signInExpired = false
+        clearRetryState()
     }
 
     // MARK: - Token access (used by UsageFetcher)
 
-    /// A valid access token from ClawdBar's own store, refreshed if near expiry.
-    /// Returns nil if not logged in here (caller falls back to Claude Code's entry).
-    func validAccessToken() async -> String? {
+    /// A usable access token from ClawdBar's own login, renewed when it's near
+    /// expiry, or when `forceRefresh` is set because the API rejected it.
+    /// Returns nil if not logged in here (the caller falls back to Claude
+    /// Code's token). Throws `AuthError.signInExpired` if the login is dead,
+    /// or the renewal error if it failed for a temporary reason; the login is
+    /// kept and renewed again later.
+    func validAccessToken(forceRefresh: Bool = false) async throws -> String? {
         guard let creds = try? Self.readStored(service: service, account: account) else { return nil }
         let msToExpiry = creds.expiresAt - Date().timeIntervalSince1970 * 1000
-        if msToExpiry < 60_000, let refreshed = try? await refresh(creds) {
-            return refreshed.accessToken
-        }
-        return creds.accessToken
-    }
-
-    /// Force a refresh after a 401. Returns true if we now hold a fresh token.
-    @discardableResult
-    func forceRefresh() async -> Bool {
-        guard let creds = try? Self.readStored(service: service, account: account),
-              (try? await refresh(creds)) != nil else { return false }
-        return true
+        guard forceRefresh || msToExpiry < 60_000 else { return creds.accessToken }
+        return try await refresh(creds).accessToken
     }
 
     // MARK: - Internals
 
     private func refresh(_ creds: Creds) async throws -> Creds {
-        let new = try await exchange([
+        if let refreshTask { return try await refreshTask.value }
+        if Date() < retryNotBefore, let lastRetryableError { throw lastRetryableError }
+
+        let task = Task { try await renew(creds) }
+        refreshTask = task
+        defer { refreshTask = nil }
+        do {
+            let new = try await task.value
+            clearRetryState()
+            return new
+        } catch AuthError.signInExpired {
+            // The only failure that needs the user: the refresh token is dead
+            logger.error("Refresh token rejected (invalid_grant); signing out")
+            logout()
+            signInExpired = true
+            throw AuthError.signInExpired
+        } catch {
+            retryDelay = min(max(retryDelay * 2, 60), 15 * 60)
+            retryNotBefore = Date().addingTimeInterval(retryDelay)
+            lastRetryableError = error
+            lastRefreshError = error.localizedDescription
+            logger.error("Token refresh failed, retrying in \(Int(self.retryDelay))s: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
+    /// Mirrors Claude Code's own renewal, which sends the scopes it holds
+    private func renew(_ creds: Creds) async throws -> Creds {
+        var grant = [
             "grant_type": "refresh_token",
             "refresh_token": creds.refreshToken,
             "client_id": clientID,
-        ])
+            "scope": creds.scope ?? scopes,
+        ]
+        let new: Creds
+        do {
+            new = try await exchange(grant)
+        } catch AuthError.invalidScope {
+            // Asked for more than was granted; the server then uses the
+            // original grant when no scope is sent
+            grant["scope"] = nil
+            new = try await exchange(grant)
+        }
         try store(new)
         return new
+    }
+
+    private func clearRetryState() {
+        retryDelay = 0
+        retryNotBefore = .distantPast
+        lastRetryableError = nil
+        lastRefreshError = nil
     }
 
     private func exchange(_ grant: [String: String]) async throws -> Creds {
@@ -148,9 +210,16 @@ final class ClaudeAuth: ObservableObject {
         req.httpBody = try JSONSerialization.data(withJSONObject: grant)
 
         let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw AuthError.server(body.isEmpty ? "token request failed" : body)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.badResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            switch UsageParse.tokenFailure(statusCode: http.statusCode, body: data) {
+            case .signInExpired: throw AuthError.signInExpired
+            case .invalidScope: throw AuthError.invalidScope
+            case .temporary:
+                let body = String(decoding: data, as: UTF8.self)
+                logger.error("Token request HTTP \(http.statusCode): \(body, privacy: .public)")
+                throw AuthError.server(status: http.statusCode)
+            }
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let access = json["access_token"] as? String else {
@@ -159,19 +228,22 @@ final class ClaudeAuth: ObservableObject {
         let refreshToken = (json["refresh_token"] as? String) ?? grant["refresh_token"] ?? ""
         let expiresIn = (json["expires_in"] as? NSNumber)?.doubleValue ?? 3600
         let expiresAt = (Date().timeIntervalSince1970 + expiresIn) * 1000
-        return Creds(accessToken: access, refreshToken: refreshToken, expiresAt: expiresAt)
+        let scope = (json["scope"] as? String) ?? grant["scope"]
+        return Creds(accessToken: access, refreshToken: refreshToken, expiresAt: expiresAt, scope: scope)
     }
 
     // MARK: - Keychain (ClawdBar's own item)
 
-    struct Creds { let accessToken: String; let refreshToken: String; let expiresAt: Double }
+    struct Creds { let accessToken: String; let refreshToken: String; let expiresAt: Double; let scope: String? }
 
     private func store(_ creds: Creds) throws {
-        let json = try JSONSerialization.data(withJSONObject: [
+        var fields: [String: Any] = [
             "accessToken": creds.accessToken,
             "refreshToken": creds.refreshToken,
             "expiresAt": creds.expiresAt,
-        ])
+        ]
+        fields["scope"] = creds.scope
+        let json = try JSONSerialization.data(withJSONObject: fields)
         Self.deleteStored(service: service, account: account)
         let status = SecItemAdd([
             kSecClass as String: kSecClassGenericPassword,
@@ -198,7 +270,8 @@ final class ClaudeAuth: ObservableObject {
             throw AuthError.notStored
         }
         let expiresAt = (json["expiresAt"] as? NSNumber)?.doubleValue ?? 0
-        return Creds(accessToken: access, refreshToken: refresh, expiresAt: expiresAt)
+        return Creds(accessToken: access, refreshToken: refresh, expiresAt: expiresAt,
+                     scope: json["scope"] as? String)
     }
 
     private static func deleteStored(service: String, account: String) {
@@ -227,10 +300,14 @@ final class ClaudeAuth: ObservableObject {
     }
 
     enum AuthError: LocalizedError {
-        case server(String), badResponse, notStored, keychain(OSStatus)
+        case server(status: Int), signInExpired, invalidScope, badResponse, notStored, keychain(OSStatus)
         var errorDescription: String? {
             switch self {
-            case .server(let s): return s
+            case .server(let status):
+                return status == 429 ? "Claude's sign-in server is rate limiting (HTTP 429)"
+                                     : "Claude's sign-in server returned HTTP \(status)"
+            case .signInExpired: return "the sign-in has expired"
+            case .invalidScope: return "the sign-in asked for permissions it doesn't have"
             case .badResponse: return "unexpected response"
             case .notStored: return "no stored credentials"
             case .keychain(let s): return "keychain error \(s)"

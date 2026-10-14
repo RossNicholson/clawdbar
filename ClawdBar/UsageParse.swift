@@ -48,6 +48,19 @@ enum UsageParse {
         return reset.timeIntervalSince(last) > 3600
     }
 
+    /// What a failed token request means. Only `invalid_grant` says the saved
+    /// login is dead and needs the user; anything else (offline, rate limited,
+    /// server trouble) is temporary and worth retrying later.
+    enum TokenFailure: Equatable { case signInExpired, invalidScope, temporary }
+
+    static func tokenFailure(statusCode: Int, body: Data) -> TokenFailure {
+        guard statusCode == 400 || statusCode == 401 else { return .temporary }
+        let text = String(decoding: body, as: UTF8.self)
+        if text.contains("invalid_grant") { return .signInExpired }
+        if text.contains("invalid_scope") { return .invalidScope }
+        return .temporary
+    }
+
     /// What to say when a response carried no usage headers, by HTTP status
     static func noUsageMessage(statusCode code: Int) -> String {
         switch code {

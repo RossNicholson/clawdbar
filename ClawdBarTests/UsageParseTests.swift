@@ -57,4 +57,18 @@ final class UsageParseTests: XCTestCase {
         XCTAssertTrue(UsageParse.noUsageMessage(statusCode: 404).contains("update"))
         XCTAssertTrue(UsageParse.noUsageMessage(statusCode: 403).contains("Pro or Max"))
     }
+
+    func testOnlyInvalidGrantNeedsANewSignIn() {
+        func failure(_ status: Int, _ body: String) -> UsageParse.TokenFailure {
+            UsageParse.tokenFailure(statusCode: status, body: Data(body.utf8))
+        }
+        XCTAssertEqual(failure(400, #"{"error":"invalid_grant","error_description":"Refresh token not found or invalid"}"#), .signInExpired)
+        XCTAssertEqual(failure(401, #"{"error":{"type":"invalid_grant"}}"#), .signInExpired)
+        XCTAssertEqual(failure(400, #"{"error":"invalid_scope"}"#), .invalidScope)
+        // Rate limits, server trouble and other errors are retried, not a sign-out
+        XCTAssertEqual(failure(429, #"{"error":{"type":"rate_limit_error"}}"#), .temporary)
+        XCTAssertEqual(failure(503, "invalid_grant"), .temporary)
+        XCTAssertEqual(failure(400, #"{"error":"invalid_request"}"#), .temporary)
+        XCTAssertEqual(failure(401, ""), .temporary)
+    }
 }

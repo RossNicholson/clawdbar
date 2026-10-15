@@ -184,8 +184,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
            (fetcher.lastUpdated.map { Date().timeIntervalSince($0) > 30 } ?? true) {
             Task { await fetcher.refresh() }
         }
+        // Clicks on our own menu bar figures arrive here too; leave those to togglePanel
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.closePanel()
+            guard let self, !self.mouseIsOverStatusItem else { return }
+            self.closePanel()
         }
     }
 
@@ -222,7 +224,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.panel.isVisible else { return }
             if NSApp.modalWindow != nil || NSApp.keyWindow != nil { return }
+            // A click on the menu bar figures is togglePanel's to handle; closing
+            // here would make that click reopen the panel straight away.
+            if self.mouseIsOverStatusItem { return }
             self.closePanel()
         }
+    }
+
+    private var mouseIsOverStatusItem: Bool {
+        guard let button = statusItem.button, let window = button.window else { return false }
+        let frame = window.convertToScreen(button.convert(button.bounds, to: nil))
+        return frame.contains(NSEvent.mouseLocation)
     }
 }

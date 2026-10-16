@@ -20,7 +20,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-    <img src="docs/screenshot-light.png" alt="ClawdBar's panel: 5-hour session at 42% and 7-day weekly at 27%, each with a reset time" width="300">
+    <img src="docs/screenshot-light.png" alt="ClawdBar's panel: 5-hour session at 42% and 7-day weekly at 27%, each with a reset time, and a forecast that the week will end with about half to spare" width="300">
   </picture>
 </p>
 
@@ -74,7 +74,7 @@ Open **Settings → Check for updates → Update ClawdBar**, and it quits, updat
 
 <table>
   <tr>
-    <td align="center"><img src="docs/busy.png" alt="Busy day: session at 86% in peach, weekly at 64% in butter" width="200"><br><sub><b>Busy day</b></sub></td>
+    <td align="center"><img src="docs/busy.png" alt="Busy day: session at 86% in peach, weekly at 64% in butter and forecast to run dry a day early" width="200"><br><sub><b>Busy day</b></sub></td>
     <td align="center"><img src="docs/settings.png" alt="Settings: usage alerts, refresh interval, launch at login, Claude account, updates" width="190"><br><sub><b>Settings</b></sub></td>
     <td align="center"><img src="docs/welcome.png" alt="Welcome screen explaining how ClawdBar works" width="200"><br><sub><b>First launch</b></sub></td>
   </tr>

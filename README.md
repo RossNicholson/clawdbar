@@ -65,6 +65,7 @@ Open **Settings → Check for updates → Update ClawdBar**, and it quits, updat
 
 - **In your menu bar:** two numbers, like `42% · 27%`, for your 5-hour session and 7-day weekly usage. They're coloured green, then orange from 50%, then red from 80%.
 - **At a glance:** click for a colour-block card per limit (mint, then butter, then peach), with the exact percentage, a progress bar and when it resets.
+- **Weekly forecast:** a striped "ghost" on the weekly bar shows where you'll be at reset at your current pace, with a plain verdict: plenty to spare, how much a day you can use and still last, or roughly when you'll run out.
 - **Usage alerts:** an optional notification when a limit passes your threshold (50–95%, 80% by default). Each limit alerts once per window, even if ClawdBar restarts.
 - **Your pace:** check every 30 seconds, every minute or every 5 minutes.
 - **Its own sign-in, if you want it:** ClawdBar normally uses Claude Code's sign-in. You can also log in with Claude directly, so it keeps working when Claude Code's session expires.

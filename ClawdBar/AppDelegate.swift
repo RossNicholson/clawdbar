@@ -46,7 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         #if DEBUG
         // `-demo YES` shows sample usage without touching the Keychain or the API,
         // for checking the UI. `-demoError YES` adds an error, `-demoLogin YES`
-        // opens the login sheet.
+        // opens the login sheet, and `-demoWeekly 0.71` sets the weekly figure
+        // to try the forecast's states.
         if UserDefaults.standard.bool(forKey: "demo") { startDemo(); return }
         #endif
 
@@ -145,8 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func startDemo() {
         isDemo = true
         setupUsagePanel()
+        let weekly = UserDefaults.standard.double(forKey: "demoWeekly")
         fetcher.usage = UsageData(session5h: 0.42, session5hReset: Date().addingTimeInterval(2 * 3600 + 15 * 60),
-                                  weekly7d: 0.27, weekly7dReset: Date().addingTimeInterval(3 * 86400 + 5 * 3600),
+                                  weekly7d: weekly > 0 ? weekly : 0.27,
+                                  weekly7dReset: Date().addingTimeInterval(3 * 86400 + 5 * 3600),
                                   status: "allowed")
         fetcher.lastUpdated = Date()
         if UserDefaults.standard.bool(forKey: "demoError") {

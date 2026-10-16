@@ -274,7 +274,12 @@ private extension Double {
 }
 
 func formatTimeRemaining(until date: Date) -> String {
-    let seconds = max(0, date.timeIntervalSinceNow)
+    formatDuration(date.timeIntervalSinceNow)
+}
+
+/// "3d 5h", "2h 15m" or "40m"
+func formatDuration(_ interval: TimeInterval) -> String {
+    let seconds = max(0, interval)
     let minutes = Int(seconds / 60)
     let hours = minutes / 60
     let days = hours / 24

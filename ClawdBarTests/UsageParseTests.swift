@@ -71,4 +71,67 @@ final class UsageParseTests: XCTestCase {
         XCTAssertEqual(failure(400, #"{"error":"invalid_request"}"#), .temporary)
         XCTAssertEqual(failure(401, ""), .temporary)
     }
+
+    // MARK: - Weekly forecast
+
+    private let now = Date(timeIntervalSince1970: 1_792_000_000)
+
+    /// A forecast `daysIn` days into the week at `used` usage
+    private func forecast(used: Double, daysIn: Double) -> WeeklyForecast? {
+        UsageParse.weeklyForecast(used: used, reset: now.addingTimeInterval((7 - daysIn) * 86400), now: now)
+    }
+
+    func testForecastPlenty() throws {
+        // 40% after 4 days is 10% a day, so 70% by reset
+        let f = try XCTUnwrap(forecast(used: 0.4, daysIn: 4))
+        XCTAssertEqual(f.verdict, .plenty)
+        XCTAssertEqual(f.projectedAtReset, 0.7, accuracy: 0.0001)
+        XCTAssertNil(f.runsOutAt)
+        XCTAssertEqual(f.message(now: now), "You'll make it, ~30% to spare")
+        XCTAssertEqual(f.ghostLabel, "~70% at reset")
+        XCTAssertEqual(f.paceText, "0.7× pace")
+    }
+
+    func testForecastTight() throws {
+        // 65% after 5 days: 91% by reset; 35% left over 2 days is 17.5% a day
+        let f = try XCTUnwrap(forecast(used: 0.65, daysIn: 5))
+        XCTAssertEqual(f.verdict, .tight)
+        XCTAssertEqual(f.dailyBudget, 0.175, accuracy: 0.0001)
+        XCTAssertEqual(f.message(now: now), "Keep under 17% a day to last")
+    }
+
+    func testForecastRunsOut() throws {
+        // 60% after 3 days is 20% a day: out in 2 more days, 2 days before reset
+        let f = try XCTUnwrap(forecast(used: 0.6, daysIn: 3))
+        XCTAssertEqual(f.verdict, .runsOut)
+        XCTAssertEqual(f.projectedAtReset, 1.4, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(f.runsOutAt).timeIntervalSince(now), 2 * 86400, accuracy: 1)
+        XCTAssertTrue(f.message(now: now).hasSuffix(", 2d early"), f.message(now: now))
+        XCTAssertEqual(f.ghostLabel, "Over by reset, ~140%")
+        XCTAssertEqual(WeeklyForecast.roughly(21 * 3600 + 13 * 60), "21h")
+        XCTAssertEqual(WeeklyForecast.roughly(39 * 3600 + 40 * 60), "1d 16h")
+        XCTAssertEqual(WeeklyForecast.roughly(600), "under 1h")
+    }
+
+    func testForecastNeedsData() {
+        XCTAssertNil(forecast(used: 0.3, daysIn: 0.25))   // too early in the week
+        XCTAssertNil(forecast(used: 0, daysIn: 3))
+        XCTAssertNil(forecast(used: 1, daysIn: 3))        // already at the limit
+        XCTAssertNil(UsageParse.weeklyForecast(used: 0.5, reset: nil, now: now))
+        XCTAssertNil(UsageParse.weeklyForecast(used: 0.5, reset: now.addingTimeInterval(-60), now: now))
+    }
+
+    func testForecastTimeIsRoundedToTheHour() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let us = Locale(identifier: "en_US"), uk = Locale(identifier: "en_GB")
+        // now is Wed 2026-10-14 17:46:40 UTC
+        func when(_ offset: TimeInterval, _ locale: Locale) -> String {
+            WeeklyForecast.when(now.addingTimeInterval(offset), now: now, calendar: calendar, locale: locale)
+        }
+        XCTAssertEqual(when(3 * 3600, us), "Today ~9pm")          // 20:46 rounds up
+        XCTAssertEqual(when(3 * 3600, uk), "Today ~21:00")
+        XCTAssertEqual(when(86400 - 1200, us), "Tomorrow ~5pm")   // 17:26 rounds down
+        XCTAssertEqual(when(2 * 86400, uk), "Fri ~18:00")
+    }
 }

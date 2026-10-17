@@ -69,6 +69,7 @@ Open **Settings → Check for updates → Update ClawdBar**, and it quits, updat
 - **Usage alerts:** an optional notification when a limit passes your threshold (50–95%, 80% by default). Each limit alerts once per window, even if ClawdBar restarts.
 - **Your pace:** check every 30 seconds, every minute or every 5 minutes.
 - **Its own sign-in, if you want it:** ClawdBar normally uses Claude Code's sign-in. You can also log in with Claude directly, so it keeps working when Claude Code's session expires.
+- **Make it bigger:** drag the grip in the panel's bottom-right corner. ClawdBar remembers the size.
 - **Launch at login,** light and dark mode, VoiceOver support, and a small cat who waves hello.
 - **Native SwiftUI,** with no Electron.
 

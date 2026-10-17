@@ -13,12 +13,18 @@ settings:
     DEVELOPMENT_TEAM: ""
     ENABLE_HARDENED_RUNTIME: YES
 
+packages:
+  HouseStyle:
+    path: ../mac-house-style
+
 targets:
   ClawdBar:
     type: application
     platform: macOS
     sources:
       - path: ClawdBar
+    dependencies:
+      - package: HouseStyle
     info:
       path: ClawdBar/Info.plist
       properties:

@@ -17,9 +17,9 @@ final class ScreenshotTests: XCTestCase {
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
     }
 
-    private func sampleFetcher(error: String? = nil, weekly: Double = 0.27) -> UsageFetcher {
+    private func sampleFetcher(error: String? = nil, session: Double = 0.42, weekly: Double = 0.27) -> UsageFetcher {
         let fetcher = UsageFetcher()
-        fetcher.usage = UsageData(session5h: 0.42, session5hReset: Date().addingTimeInterval(2 * 3600 + 15 * 60),
+        fetcher.usage = UsageData(session5h: session, session5hReset: Date().addingTimeInterval(2 * 3600 + 15 * 60),
                                   weekly7d: weekly, weekly7dReset: Date().addingTimeInterval(3 * 86400 + 5 * 3600),
                                   status: "allowed")
         fetcher.lastUpdated = Date().addingTimeInterval(-12)
@@ -38,6 +38,12 @@ final class ScreenshotTests: XCTestCase {
         let busy = sampleFetcher(weekly: 0.71)
         try Snapshot.panel(to: out.appendingPathComponent("panel-forecast.png")) {
             MenuBarView().environmentObject(busy).environmentObject(SelfUpdater(app: .clawdBar))
+        }
+        for dark in [false, true] {
+            let heavy = sampleFetcher(session: 0.86, weekly: 0.64)
+            try Snapshot.panel(dark: dark, to: out.appendingPathComponent("panel-busy\(dark ? "-dark" : "").png")) {
+                MenuBarView().environmentObject(heavy).environmentObject(SelfUpdater(app: .clawdBar))
+            }
         }
         let failing = sampleFetcher(error: "Claude credentials were rejected. Try signing in again via Claude Code.")
         try Snapshot.panel(to: out.appendingPathComponent("panel-error.png")) {

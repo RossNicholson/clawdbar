@@ -52,7 +52,7 @@ Open ClawdBar, then click **Allow access & continue**. macOS asks once for permi
 
 ### Updating
 
-Open **Settings → Check for updates → Update ClawdBar**, and it quits, updates and reopens on its own. You can also run `brew upgrade --cask clawdbar` in Terminal.
+Open **Settings → Check for updates → Update ClawdBar**, and it quits, updates and reopens on its own. You can also run `brew upgrade --cask clawdbar` in Terminal. If you installed ClawdBar from the DMG instead, Check for updates asks GitHub for the latest version and opens its download page.
 
 > **On ClawdBar 1.0.6 or earlier with Homebrew 7?** If *Update ClawdBar* doesn't work, update once from Terminal:
 > ```bash
@@ -135,6 +135,7 @@ The `.xcodeproj` isn't checked in. It's generated from `project.yml`, so run `ma
 | Command | What it does |
 |---|---|
 | `make test` | Run the unit tests |
+| `make screenshots` | Render the panel, popovers and welcome screen with sample usage into `build/screenshots` |
 | `make dmg` | Build a local signed and notarized DMG (doesn't publish) |
 | `make release VERSION=x.y.z` | Ship a release; see [RELEASING.md](RELEASING.md) |
 
@@ -156,4 +157,4 @@ If ClawdBar helps you pace your day, you can [buy me a coffee](https://buymeacof
 
 MIT. See [LICENSE](LICENSE).
 
-The bundled fonts, Barlow Condensed and Geist Mono, are under the SIL Open Font License (see `ClawdBar/Fonts`). ClawdBar is an independent app and isn't affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.
+The look and the menu bar panel come from [HouseStyle](https://github.com/RossNicholson/mac-house-style) (MIT), shared with my other Mac apps, BrewDock and Mop Up. Its bundled fonts, Barlow Condensed and Geist Mono, are under the SIL Open Font License. ClawdBar is an independent app and isn't affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.

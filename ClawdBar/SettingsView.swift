@@ -57,13 +57,6 @@ struct SettingsView: View {
                 }
             })
 
-            SettingToggle(title: "Launch at login", detail: "Start ClawdBar when you log in",
-                          isOn: Binding(get: { launchAtLogin }, set: { setLaunchAtLogin($0) })) {
-                if let loginItemError {
-                    SettingNote(loginItemError)
-                }
-            }
-
             SettingCard(title: "Claude account", detail: accountStatus, trailing: {
                 Button {
                     if auth.isLoggedIn {
@@ -85,6 +78,13 @@ struct SettingsView: View {
                 }
                 .buttonStyle(PressableStyle())
             })
+
+            SettingToggle(title: "Launch at login", detail: "Start ClawdBar when you log in",
+                          isOn: Binding(get: { launchAtLogin }, set: { setLaunchAtLogin($0) })) {
+                if let loginItemError {
+                    SettingNote(loginItemError)
+                }
+            }
 
             UpdateBlock(updater: selfUpdater, app: .clawdBar)
         }

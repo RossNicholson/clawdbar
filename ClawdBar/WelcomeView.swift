@@ -6,7 +6,7 @@ struct WelcomeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
-                Mascot(size: 64)
+                Mascot(size: 56)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Hi, I'm ClawdBar")
                         .font(.display(28, relativeTo: .largeTitle))
@@ -32,11 +32,8 @@ struct WelcomeView: View {
             }
             .padding(.top, 2)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 18)
-        .padding(.top, 2)   // the panel's hidden title bar already adds space above
-        .frame(width: 300)
-        .background(AppColors.ground)
+        .padding(18)
+        .menuBarPanel(resizable: false)
     }
 
     private func infoCard(title: String, fill: Color, text: String) -> some View {
@@ -52,6 +49,6 @@ struct WelcomeView: View {
         .foregroundStyle(AppColors.ink)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(fill, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
     }
 }

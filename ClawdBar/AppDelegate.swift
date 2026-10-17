@@ -3,18 +3,12 @@ import Combine
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private var panel: NSPanel!
-    private var eventMonitor: Any?
-    /// An off-screen copy of the panel's content at its natural size, to
-    /// measure how big the panel needs to be
-    private var measure: NSView?
-    /// Only the usage panel can be resized; the welcome panel fits its content
-    private var panelIsResizable = false
+    private var panel: MenuBarPanelController!
     private var cancellables = Set<AnyCancellable>()
     let fetcher = UsageFetcher()
-    let selfUpdater = SelfUpdater()
+    let selfUpdater = SelfUpdater(app: .clawdBar)
 
     private var isDemo = false
 
@@ -27,11 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.title = hasGrantedAccess ? "––" : "🐾"
-            button.action = #selector(togglePanel)
-            button.target = self
-        }
+        statusItem.button?.title = hasGrantedAccess ? "––" : "🐾"
+        panel = MenuBarPanelController(statusItem: statusItem)
+        panel.onOpen = { [weak self] in self?.refreshIfStale() }
 
         fetcher.$usage.receive(on: RunLoop.main).sink { [weak self] (_: UsageData) in
             self?.updateStatusTitle()
@@ -40,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // The menu bar figures go grey while checks are failing.
         fetcher.$lastError.receive(on: RunLoop.main).sink { [weak self] _ in
             DispatchQueue.main.async {
-                self?.fitPanelToContent()
+                self?.panel.fitToContent()
                 self?.updateStatusTitle()
             }
         }.store(in: &cancellables)
@@ -62,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Task { await selfUpdater.checkSilent() }
         } else {
             setupWelcomePanel()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.openPanel() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.panel.open() }
         }
     }
 
@@ -93,82 +85,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    // MARK: - Panel setup
-
-    private func makePanel(for content: NSView) -> NSPanel {
-        let p = NSPanel(
-            contentRect: NSRect(origin: .zero, size: measure?.fittingSize ?? content.fittingSize),
-            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        p.delegate = self
-        p.isFloatingPanel = true
-        p.level = .popUpMenu
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        p.isOpaque = false
-        p.backgroundColor = .clear
-        p.titleVisibility = .hidden
-        p.titlebarAppearsTransparent = true
-        p.isMovableByWindowBackground = true
-        p.standardWindowButton(.closeButton)?.isHidden = true
-        p.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        p.standardWindowButton(.zoomButton)?.isHidden = true
-        return p
-    }
+    // MARK: - Panel
 
     private func setupWelcomePanel() {
-        let content = WelcomeView { [weak self] in
-            self?.grantAccess()
+        panel.setContent(resizable: false) {
+            WelcomeView { [weak self] in self?.grantAccess() }
         }
-        let hostingView = NSHostingView(rootView: content)
-        let welcomeMeasure = NSHostingView(rootView: WelcomeView {})
-        if #available(macOS 13.3, *) { welcomeMeasure.safeAreaRegions = [] }
-        measure = welcomeMeasure
-        panelIsResizable = false
-        panel = makePanel(for: hostingView)
-        install(hostingView, in: panel)
     }
 
     private func setupUsagePanel() {
-        let content = MenuBarView(onResized: { size in
-            UserDefaults.standard.set(NSStringFromSize(size), forKey: "panelSize")
-        })
-            .environmentObject(fetcher)
-            .environmentObject(selfUpdater)
-        let hostingView = NSHostingView(rootView: content)
-        let usageMeasure = NSHostingView(rootView: MenuBarView(flexible: false)
-            .environmentObject(fetcher)
-            .environmentObject(selfUpdater))
-        if #available(macOS 13.3, *) { usageMeasure.safeAreaRegions = [] }
-        measure = usageMeasure
-        panelIsResizable = true
-        panel = makePanel(for: hostingView)
-        install(hostingView, in: panel)
+        panel.setContent {
+            MenuBarView()
+                .environmentObject(fetcher)
+                .environmentObject(selfUpdater)
+        }
     }
 
-    /// The SwiftUI view goes inside a plain container rather than being the
-    /// panel's own content view: as the content view, SwiftUI sizes the window
-    /// from its content, which fights the resize grip and loops.
-    private func install<V: View>(_ hostingView: NSHostingView<V>, in panel: NSPanel) {
-        hostingView.sizingOptions = []
-        // The panel's title bar is hidden; don't leave a gap for it
-        if #available(macOS 13.3, *) { hostingView.safeAreaRegions = [] }
-        let container = NSView(frame: NSRect(origin: .zero, size: panel.frame.size))
-        hostingView.frame = container.bounds
-        hostingView.autoresizingMask = [.width, .height]
-        container.addSubview(hostingView)
-        panel.contentView = container
+    /// Fresh numbers on open if the last refresh is more than 30 seconds old
+    private func refreshIfStale() {
+        if hasGrantedAccess, !fetcher.isLoading,
+           (fetcher.lastUpdated.map { Date().timeIntervalSince($0) > 30 } ?? true) {
+            Task { await fetcher.refresh() }
+        }
     }
 
     private func grantAccess() {
         hasGrantedAccess = true
-        closePanel()
+        panel.close()
         setupUsagePanel()
         statusItem.button?.title = "––"
         fetcher.start()
         Task { await selfUpdater.checkSilent() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.openPanel() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.panel.open() }
     }
 
     #if DEBUG
@@ -186,100 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         updateStatusTitle()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.openPanel()
+            self.panel.open()
             if UserDefaults.standard.bool(forKey: "demoLogin") { ClaudeAuth.shared.awaitingCode = true }
         }
     }
     #endif
-
-    // MARK: - Panel show/hide
-
-    @objc func togglePanel() {
-        if panel.isVisible { closePanel() } else { openPanel() }
-    }
-
-    /// Resize the panel to its SwiftUI content, keeping it hanging from the menu bar
-    /// Size the panel to its content, or to the size you dragged it to if
-    /// that's bigger, keeping it hanging from the menu bar. It can't be made
-    /// smaller than its content.
-    private func fitPanelToContent() {
-        guard let panel, let measure else { return }
-        let fit = measure.fittingSize
-        guard fit.width > 0, fit.height > 0 else { return }
-        panel.minSize = fit
-        let saved = panelIsResizable
-            ? (UserDefaults.standard.string(forKey: "panelSize").map(NSSizeFromString) ?? .zero) : .zero
-        let size = NSSize(width: max(fit.width, saved.width), height: max(fit.height, saved.height))
-        guard size != panel.frame.size else { return }
-        if panel.isVisible {
-            let frame = panel.frame
-            panel.setFrame(NSRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height),
-                           display: true)
-        } else {
-            panel.setContentSize(size)
-        }
-    }
-
-
-    private func openPanel() {
-        fitPanelToContent()
-        positionPanel()
-        panel.makeKeyAndOrderFront(nil)
-        // Fresh numbers on open if the last refresh is more than 30 seconds old
-        if hasGrantedAccess, !fetcher.isLoading,
-           (fetcher.lastUpdated.map { Date().timeIntervalSince($0) > 30 } ?? true) {
-            Task { await fetcher.refresh() }
-        }
-        // Clicks on our own menu bar figures arrive here too; leave those to togglePanel
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            guard let self, !self.mouseIsOverStatusItem else { return }
-            self.closePanel()
-        }
-    }
-
-    func closePanel() {
-        panel.orderOut(nil)
-        if let monitor = eventMonitor {
-            NSEvent.removeMonitor(monitor)
-            eventMonitor = nil
-        }
-    }
-
-    private func positionPanel() {
-        guard let button = statusItem.button,
-              let buttonWindow = button.window else { return }
-
-        let buttonRect = button.convert(button.bounds, to: nil)
-        let screenRect = buttonWindow.convertToScreen(buttonRect)
-        guard let screen = buttonWindow.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
-
-        var x = screenRect.midX - panel.frame.width / 2
-        let y = screenRect.minY - panel.frame.height
-
-        x = min(max(x, screen.visibleFrame.minX + 4),
-                screen.visibleFrame.maxX - panel.frame.width - 4)
-
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        // Wait a tick for the new key window to settle, then stay open if it's
-        // one of ours (the login code sheet or a popover): closing would hide
-        // the sheet you're typing into. Clicking another app leaves us with no
-        // key window, so the panel closes.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.panel.isVisible else { return }
-            if NSApp.modalWindow != nil || NSApp.keyWindow != nil { return }
-            // A click on the menu bar figures is togglePanel's to handle; closing
-            // here would make that click reopen the panel straight away.
-            if self.mouseIsOverStatusItem { return }
-            self.closePanel()
-        }
-    }
-
-    private var mouseIsOverStatusItem: Bool {
-        guard let button = statusItem.button, let window = button.window else { return false }
-        let frame = window.convertToScreen(button.convert(button.bounds, to: nil))
-        return frame.contains(NSEvent.mouseLocation)
-    }
 }

@@ -9,10 +9,6 @@ struct MenuBarView: View {
     @State private var showingAbout = false
 
     let timer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
-    /// Remembers the size after the corner grip is dragged
-    var onResized: ((NSSize) -> Void)? = nil
-    /// False for the off-screen copy that measures the panel's natural size
-    var flexible = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,19 +29,13 @@ struct MenuBarView: View {
                     errorCard(err)
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, PanelMetrics.inset)
             .padding(.bottom, 12)
             // When the panel is made bigger, the extra room goes here
             Spacer(minLength: 0)
             footer
         }
-        .frame(minWidth: 300, maxWidth: flexible ? .infinity : 300,
-               maxHeight: flexible ? .infinity : nil, alignment: .top)
-        .background(AppColors.ground)
-        .overlay(alignment: .bottomTrailing) {
-            ResizeGrip(onResized: onResized)
-                .padding(3)
-        }
+        .menuBarPanel()
         .onReceive(timer) { now = $0 }
         .sheet(isPresented: $auth.awaitingCode) {
             LoginCodeView {
@@ -58,26 +48,11 @@ struct MenuBarView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 6) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("ClawdBar")
-                    .font(.display(30, relativeTo: .largeTitle))
-                    .textCase(.uppercase)
-                    .foregroundStyle(AppColors.text)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Claude Code usage")
-                    .font(.mono(10))
-                    .foregroundStyle(AppColors.secondaryText)
-            }
-            Spacer(minLength: 8)
-            if fetcher.isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 26, height: 26)
-            } else {
-                HeaderIconButton(symbol: "arrow.clockwise", help: "Refresh") {
-                    Task { await fetcher.refresh() }
-                }
+        PanelHeader(title: "ClawdBar", subtitle: "Claude Code usage") {
+            Mascot(size: PanelMetrics.mascot)
+        } actions: {
+            HeaderRefreshButton(isRefreshing: fetcher.isLoading) {
+                Task { await fetcher.refresh() }
             }
             HeaderIconButton(symbol: "gearshape", help: "Settings") {
                 showingSettings.toggle()
@@ -91,12 +66,9 @@ struct MenuBarView: View {
                 showingAbout.toggle()
             }
             .popover(isPresented: $showingAbout, arrowEdge: .bottom) {
-                aboutView
+                AboutPopover(app: .clawdBar) { Mascot(size: 56) }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 2)   // the panel's hidden title bar already adds space above
-        .padding(.bottom, 12)
     }
 
     // MARK: - Error
@@ -124,70 +96,21 @@ struct MenuBarView: View {
         }
         .foregroundStyle(AppColors.ink)
         .padding(12)
-        .background(AppColors.coral, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(AppColors.coral, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
     }
 
     // MARK: - Footer
 
     private var footer: some View {
-        HStack {
-            Group {
-                if let updated = fetcher.lastUpdated {
-                    Text("Updated \(updated, style: .relative) ago")
-                } else if fetcher.lastError == nil {
-                    Text("Loading…")
-                } else {
-                    Text("Couldn't load usage")
-                }
+        PanelFooter {
+            if let updated = fetcher.lastUpdated {
+                Text("Updated \(updated, style: .relative) ago")
+            } else if fetcher.lastError == nil {
+                Text("Loading…")
+            } else {
+                Text("Couldn't load usage")
             }
-            .font(.mono(9.5))
-            .foregroundStyle(AppColors.secondaryText)
-            Spacer()
-            Button("Quit") { NSApplication.shared.terminate(nil) }
-                .font(.mono(9.5, weight: .semibold))
-                .textCase(.uppercase)
-                .buttonStyle(.plain)
-                .foregroundStyle(AppColors.text)
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 26)   // clear of the resize grip in the corner
-        .padding(.vertical, 9)
-        .overlay(alignment: .top) {
-            Rectangle().fill(AppColors.hairline).frame(height: 1)
-        }
-    }
-
-    // MARK: - About & help
-
-    private var aboutView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                PopoverHeader(
-                    title: "ClawdBar",
-                    subtitle: "Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")\nMade by Ross Nicholson"
-                )
-                Mascot(size: 56)
-            }
-
-            ColorBlockButton(title: "Get help", detail: "Bugs, questions and feature requests", fill: AppColors.mint) {
-                NSWorkspace.shared.open(URL(string: "https://rossnicholson.dev/support")!)
-            }
-            ColorBlockButton(title: "Email support", detail: "support@rossnicholson.dev", fill: AppColors.periwinkle, symbol: "envelope.fill") {
-                NSWorkspace.shared.open(URL(string: "mailto:support@rossnicholson.dev")!)
-            }
-            ColorBlockButton(title: "Buy me a coffee", detail: "If ClawdBar helps you pace your day", fill: AppColors.peach, symbol: "cup.and.saucer.fill") {
-                NSWorkspace.shared.open(URL(string: "https://buymeacoffee.com/rossnicholson")!)
-            }
-
-            HStack(spacing: 10) {
-                MonoLink(title: "Website", destination: URL(string: "https://rossnicholson.dev")!)
-                MonoLink(title: "GitHub", destination: URL(string: "https://github.com/RossNicholson/clawdbar")!)
-                MonoLink(title: "Terms", destination: URL(string: "https://rossnicholson.dev/terms")!)
-                MonoLink(title: "Privacy", destination: URL(string: "https://rossnicholson.dev/privacy")!)
-            }
-            .padding(.top, 2)
-        }
-        .popoverChrome()
     }
 }
 
@@ -238,7 +161,7 @@ struct UsageCard: View {
         }
         .foregroundStyle(ink)
         .padding(14)
-        .background(Self.fill(for: ratio), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Self.fill(for: ratio), in: RoundedRectangle(cornerRadius: Radius.block, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(accessibilityValue)
@@ -357,7 +280,7 @@ struct LoginCodeView: View {
                 .font(.mono(12))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(AppColors.surface, in: RoundedRectangle(cornerRadius: Radius.small, style: .continuous))
                 .disableAutocorrection(true)
 
             if let err = auth.loginError {
@@ -366,31 +289,19 @@ struct LoginCodeView: View {
                     .foregroundStyle(AppColors.ink)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(AppColors.coral, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(AppColors.coral, in: RoundedRectangle(cornerRadius: Radius.small, style: .continuous))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack {
-                Button("Cancel") { auth.cancelLogin() }
-                    .font(.mono(11, weight: .medium))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(AppColors.secondaryText)
+                GhostButton(title: "Cancel") { auth.cancelLogin() }
                 Spacer()
-                Button {
+                PillButton(title: auth.working ? "Checking…" : "Log in", symbol: "arrow.right") {
                     Task {
                         await auth.completeLogin(pasted: code)
                         if auth.isLoggedIn { onSuccess() }
                     }
-                } label: {
-                    Text(auth.working ? "Checking…" : "Log in")
-                        .font(.display(17, relativeTo: .headline))
-                        .textCase(.uppercase)
-                        .foregroundStyle(AppColors.onSolid)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 8)
-                        .background(AppColors.solid, in: Capsule())
                 }
-                .buttonStyle(PressableStyle())
                 .keyboardShortcut(.defaultAction)
                 .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty || auth.working)
                 .opacity(code.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)

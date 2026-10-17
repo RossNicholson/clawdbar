@@ -1,4 +1,4 @@
-.PHONY: setup generate build run test clean release dmg
+.PHONY: setup generate build run test clean release dmg screenshots
 
 setup:
 	@which xcodegen > /dev/null 2>&1 || brew install xcodegen
@@ -39,3 +39,11 @@ release:
 # Build a local notarized test DMG (does not publish).
 dmg:
 	@scripts/release.sh
+
+# Renders the panel, popovers and welcome screen with sample data into
+# build/screenshots, for the website and for checking the design
+screenshots: generate
+	SCREENSHOTS="$(CURDIR)/build/screenshots" TEST_RUNNER_SCREENSHOTS="$(CURDIR)/build/screenshots" \
+		xcodebuild test -project ClawdBar.xcodeproj -scheme ClawdBar -destination 'platform=macOS' \
+		CODE_SIGNING_ALLOWED=NO -only-testing:ClawdBarTests/ScreenshotTests -quiet
+	@echo "Screenshots in build/screenshots"

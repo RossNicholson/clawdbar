@@ -7,6 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var panel: NSPanel!
     private var eventMonitor: Any?
+    /// An off-screen copy of the panel's content at its natural size, to
+    /// measure how big the panel needs to be
+    private var measure: NSView?
+    /// Only the usage panel can be resized; the welcome panel fits its content
+    private var panelIsResizable = false
     private var cancellables = Set<AnyCancellable>()
     let fetcher = UsageFetcher()
     let selfUpdater = SelfUpdater()
@@ -92,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func makePanel(for content: NSView) -> NSPanel {
         let p = NSPanel(
-            contentRect: NSRect(origin: .zero, size: content.fittingSize),
+            contentRect: NSRect(origin: .zero, size: measure?.fittingSize ?? content.fittingSize),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -117,19 +122,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.grantAccess()
         }
         let hostingView = NSHostingView(rootView: content)
-        hostingView.autoresizingMask = [.width, .height]
+        let welcomeMeasure = NSHostingView(rootView: WelcomeView {})
+        if #available(macOS 13.3, *) { welcomeMeasure.safeAreaRegions = [] }
+        measure = welcomeMeasure
+        panelIsResizable = false
         panel = makePanel(for: hostingView)
-        panel.contentView = hostingView
+        install(hostingView, in: panel)
     }
 
     private func setupUsagePanel() {
-        let content = MenuBarView()
+        let content = MenuBarView(onResized: { size in
+            UserDefaults.standard.set(NSStringFromSize(size), forKey: "panelSize")
+        })
             .environmentObject(fetcher)
             .environmentObject(selfUpdater)
         let hostingView = NSHostingView(rootView: content)
-        hostingView.autoresizingMask = [.width, .height]
+        let usageMeasure = NSHostingView(rootView: MenuBarView(flexible: false)
+            .environmentObject(fetcher)
+            .environmentObject(selfUpdater))
+        if #available(macOS 13.3, *) { usageMeasure.safeAreaRegions = [] }
+        measure = usageMeasure
+        panelIsResizable = true
         panel = makePanel(for: hostingView)
-        panel.contentView = hostingView
+        install(hostingView, in: panel)
+    }
+
+    /// The SwiftUI view goes inside a plain container rather than being the
+    /// panel's own content view: as the content view, SwiftUI sizes the window
+    /// from its content, which fights the resize grip and loops.
+    private func install<V: View>(_ hostingView: NSHostingView<V>, in panel: NSPanel) {
+        hostingView.sizingOptions = []
+        // The panel's title bar is hidden; don't leave a gap for it
+        if #available(macOS 13.3, *) { hostingView.safeAreaRegions = [] }
+        let container = NSView(frame: NSRect(origin: .zero, size: panel.frame.size))
+        hostingView.frame = container.bounds
+        hostingView.autoresizingMask = [.width, .height]
+        container.addSubview(hostingView)
+        panel.contentView = container
     }
 
     private func grantAccess() {
@@ -170,13 +199,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// Resize the panel to its SwiftUI content, keeping it hanging from the menu bar
+    /// Size the panel to its content, or to the size you dragged it to if
+    /// that's bigger, keeping it hanging from the menu bar. It can't be made
+    /// smaller than its content.
     private func fitPanelToContent() {
-        guard let panel, let content = panel.contentView else { return }
-        let size = content.fittingSize
-        guard size != panel.frame.size, size.width > 0, size.height > 0 else { return }
-        panel.setContentSize(size)
-        if panel.isVisible { positionPanel() }
+        guard let panel, let measure else { return }
+        let fit = measure.fittingSize
+        guard fit.width > 0, fit.height > 0 else { return }
+        panel.minSize = fit
+        let saved = panelIsResizable
+            ? (UserDefaults.standard.string(forKey: "panelSize").map(NSSizeFromString) ?? .zero) : .zero
+        let size = NSSize(width: max(fit.width, saved.width), height: max(fit.height, saved.height))
+        guard size != panel.frame.size else { return }
+        if panel.isVisible {
+            let frame = panel.frame
+            panel.setFrame(NSRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height),
+                           display: true)
+        } else {
+            panel.setContentSize(size)
+        }
     }
+
 
     private func openPanel() {
         fitPanelToContent()

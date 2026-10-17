@@ -9,6 +9,10 @@ struct MenuBarView: View {
     @State private var showingAbout = false
 
     let timer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    /// Remembers the size after the corner grip is dragged
+    var onResized: ((NSSize) -> Void)? = nil
+    /// False for the off-screen copy that measures the panel's natural size
+    var flexible = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,10 +35,17 @@ struct MenuBarView: View {
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 12)
+            // When the panel is made bigger, the extra room goes here
+            Spacer(minLength: 0)
             footer
         }
-        .frame(width: 300)
+        .frame(minWidth: 300, maxWidth: flexible ? .infinity : 300,
+               maxHeight: flexible ? .infinity : nil, alignment: .top)
         .background(AppColors.ground)
+        .overlay(alignment: .bottomTrailing) {
+            ResizeGrip(onResized: onResized)
+                .padding(3)
+        }
         .onReceive(timer) { now = $0 }
         .sheet(isPresented: $auth.awaitingCode) {
             LoginCodeView {
@@ -138,7 +149,8 @@ struct MenuBarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(AppColors.text)
         }
-        .padding(.horizontal, 16)
+        .padding(.leading, 16)
+        .padding(.trailing, 26)   // clear of the resize grip in the corner
         .padding(.vertical, 9)
         .overlay(alignment: .top) {
             Rectangle().fill(AppColors.hairline).frame(height: 1)

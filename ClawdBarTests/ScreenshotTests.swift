@@ -60,7 +60,7 @@ final class ScreenshotTests: XCTestCase {
             }
         }
         try Snapshot.panel(to: out.appendingPathComponent("panel-about.png")) {
-            AboutPopover(app: .clawdBar) { Mascot(size: 56) }
+            AboutPopover(app: .clawdBar, hidingInstalledApps: false) { Mascot(size: 56) }
         }
         try Snapshot.panel(to: out.appendingPathComponent("panel-welcome.png")) {
             WelcomeView {}

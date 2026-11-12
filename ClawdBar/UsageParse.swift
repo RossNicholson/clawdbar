@@ -4,6 +4,38 @@ import Foundation
 /// Keychain access) so it can be unit tested.
 enum UsageParse {
 
+    /// Reads the usage endpoint's answer (`GET /api/oauth/usage`, the one
+    /// Claude Code's /usage reads): {"five_hour": {"utilization": 15.0,
+    /// "resets_at": "2026-…+00:00"}, "seven_day": {…}}, utilization in percent.
+    /// Nil when it has neither window, e.g. on a plan without usage limits.
+    static func usage(fromUsageEndpoint data: Data) -> UsageData? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let session = json["five_hour"] as? [String: Any]
+        let weekly = json["seven_day"] as? [String: Any]
+        guard session != nil || weekly != nil else { return nil }
+        func fraction(_ window: [String: Any]?) -> Double? {
+            (window?["utilization"] as? NSNumber).map { $0.doubleValue / 100 }
+        }
+        func reset(_ window: [String: Any]?) -> Date? {
+            (window?["resets_at"] as? String).flatMap(isoDate)
+        }
+        var result = UsageData()
+        result.session5h = fraction(session)
+        result.session5hReset = reset(session)
+        result.weekly7d = fraction(weekly)
+        result.weekly7dReset = reset(weekly)
+        return result
+    }
+
+    /// ISO 8601 with or without fractional seconds
+    static func isoDate(_ text: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: text) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: text)
+    }
+
     /// Reads Anthropic's unified rate-limit headers (keys lowercased). Nil when
     /// the response has none, e.g. on a plan without usage limits.
     static func usage(fromHeaders headers: [String: String]) -> UsageData? {
@@ -102,7 +134,8 @@ struct WeeklyForecast: Equatable {
 
     /// "~73% at reset", or "Over by reset" when it won't last
     var ghostLabel: String {
-        projectedAtReset > 1 ? "Over by reset, ~\(Int((projectedAtReset * 100).rounded()))%"
+        // Over is over: never round it down to "~100%"
+        projectedAtReset > 1 ? "Over by reset, ~\(max(101, Int((projectedAtReset * 100).rounded())))%"
                              : "~\(Int((projectedAtReset * 100).rounded()))% at reset"
     }
 
@@ -111,7 +144,8 @@ struct WeeklyForecast: Equatable {
         case .plenty:
             return "You'll make it, ~\(Int(((1 - projectedAtReset) * 100).rounded()))% to spare"
         case .tight:
-            return "Keep under \(max(1, Int(dailyBudget * 100)))% a day to last"
+            // Rounded down, but not 0.08 down to 7 by floating-point error
+            return "Keep under \(max(1, Int(dailyBudget * 100 + 1e-9)))% a day to last"
         case .runsOut:
             guard let runsOutAt else { return "Won't last to reset" }
             return "\(Self.when(runsOutAt, now: now, calendar: calendar, locale: locale)), \(Self.roughly(reset.timeIntervalSince(runsOutAt))) early"
@@ -170,7 +204,8 @@ extension UsageParse {
         return WeeklyForecast(
             verdict: verdict,
             projectedAtReset: projected,
-            dailyBudget: (1 - used) / (left / 86400),
+            // Under a day from reset, a day's budget is just what's left
+            dailyBudget: min(1 - used, (1 - used) / (left / 86400)),
             runsOutAt: verdict == .runsOut ? now.addingTimeInterval((1 - used) / rate) : nil,
             reset: reset
         )

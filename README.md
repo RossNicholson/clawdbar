@@ -86,8 +86,8 @@ Open **Settings → Check for updates → Update ClawdBar**, and it quits, updat
 ## How it works
 
 1. **Your sign-in.** ClawdBar reads the Claude Code sign-in saved in your Mac's Keychain (the `Claude Code-credentials` entry the Claude Code app and CLI create). If you've logged in with ClawdBar itself, it uses that instead. It never changes Claude Code's sign-in.
-2. **A tiny check.** At your chosen interval, ClawdBar sends Anthropic's API the smallest request it can (one token, to the Haiku model). It then reads the usage figures Anthropic returns alongside it, in the `anthropic-ratelimit-unified-*` headers. Each check uses a sliver of your limits, about as much as typing "hi".
-3. **The numbers.** Those headers give the share of each limit you've used and when it resets. That's everything ClawdBar shows.
+2. **A read-only check.** At your chosen interval, ClawdBar asks Anthropic's API for your usage, the same figures Claude Code's `/usage` shows. It only reads them, so checking uses none of your limits.
+3. **The numbers.** Anthropic answers with the share of each limit you've used and when it resets. That's everything ClawdBar shows.
 
 ClawdBar's own sign-in uses the same sign-in flow as Claude Code. Anthropic doesn't document it, so a change on their side could mean ClawdBar needs an update.
 

@@ -17,6 +17,27 @@ final class UsageParseTests: XCTestCase {
         XCTAssertEqual(usage?.status, "allowed")
     }
 
+    func testReadsTheUsageEndpoint() {
+        // Trimmed from a real answer of GET /api/oauth/usage
+        let body = #"""
+        {"five_hour": {"utilization": 15.0, "resets_at": "2026-11-12T23:50:00.419859+00:00", "limit_dollars": null},
+         "seven_day": {"utilization": 21.0, "resets_at": "2026-11-17T16:00:00+00:00"},
+         "seven_day_opus": null, "extra_usage": {"is_enabled": false}, "limits": []}
+        """#
+        let usage = UsageParse.usage(fromUsageEndpoint: Data(body.utf8))
+        XCTAssertEqual(usage?.session5h ?? 0, 0.15, accuracy: 0.0001)
+        XCTAssertEqual(usage?.weekly7d ?? 0, 0.21, accuracy: 0.0001)
+        XCTAssertEqual(usage?.session5hReset?.timeIntervalSince1970 ?? 0, 1_794_527_400.419, accuracy: 0.01)
+        XCTAssertEqual(usage?.weekly7dReset, Date(timeIntervalSince1970: 1_794_931_200))
+        // No session running: no reset time yet
+        let idle = UsageParse.usage(fromUsageEndpoint: Data(#"{"five_hour": {"utilization": 0, "resets_at": null}, "seven_day": null}"#.utf8))
+        XCTAssertEqual(idle?.session5h, 0)
+        XCTAssertNil(idle?.session5hReset)
+        XCTAssertNil(idle?.weekly7d)
+        XCTAssertNil(UsageParse.usage(fromUsageEndpoint: Data(#"{"limits": []}"#.utf8)), "a plan without limits")
+        XCTAssertNil(UsageParse.usage(fromUsageEndpoint: Data("<html>".utf8)))
+    }
+
     func testNoUsageWithoutUnifiedHeaders() {
         XCTAssertNil(UsageParse.usage(fromHeaders: ["content-type": "application/json"]))
     }
@@ -111,6 +132,18 @@ final class UsageParseTests: XCTestCase {
         XCTAssertEqual(WeeklyForecast.roughly(21 * 3600 + 13 * 60), "21h")
         XCTAssertEqual(WeeklyForecast.roughly(39 * 3600 + 40 * 60), "1d 16h")
         XCTAssertEqual(WeeklyForecast.roughly(600), "under 1h")
+    }
+
+    func testForecastNeverContradictsItself() throws {
+        // 92% with 6 hours to go: no more than the 8% that's left a day
+        let tight = try XCTUnwrap(forecast(used: 0.92, daysIn: 7 - 0.25))
+        XCTAssertEqual(tight.verdict, .tight)
+        XCTAssertEqual(tight.dailyBudget, 0.08, accuracy: 0.0001)
+        XCTAssertEqual(tight.message(now: now), "Keep under 8% a day to last")
+        // Only just over: still reads as over, not "~100%"
+        let over = try XCTUnwrap(forecast(used: 0.501, daysIn: 3.5))
+        XCTAssertEqual(over.verdict, .runsOut)
+        XCTAssertEqual(over.ghostLabel, "Over by reset, ~101%")
     }
 
     func testForecastNeedsData() {

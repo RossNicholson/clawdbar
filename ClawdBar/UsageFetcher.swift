@@ -19,6 +19,9 @@ final class UsageFetcher: ObservableObject {
 
     private var timer: Timer?
     private var cachedToken: String?
+    // After a "Don't Allow" on Claude Code's Keychain item, don't ask again on
+    // every poll; a manual refresh (resetCredentials) asks straight away
+    private var keychainDeniedUntil = Date.distantPast
 
     func start() {
         let interval = UserDefaults.standard.double(forKey: "refreshInterval").nonZero ?? 60
@@ -46,6 +49,7 @@ final class UsageFetcher: ObservableObject {
     /// next refresh picks the right credentials.
     func resetCredentials() {
         cachedToken = nil
+        keychainDeniedUntil = .distantPast
     }
 
     func refresh() async {
@@ -79,26 +83,33 @@ final class UsageFetcher: ObservableObject {
 
     /// ClawdBar's own login is checked every time (it's cheap, and renews
     /// itself before expiry), so logging in or out takes effect on the next
-    /// refresh. If it can't give a token right now, Claude Code's is used
-    /// instead, so a renewal hiccup doesn't interrupt anything. Only Claude
-    /// Code's token is cached, to avoid a Keychain read every poll.
+    /// refresh. Claude Code's token is used only when ClawdBar has no login
+    /// of its own: it can belong to another account, so a failed renewal
+    /// shows an error rather than quietly switching. Only Claude Code's
+    /// token is cached, to avoid a Keychain read every poll.
     private func currentToken(forceRefresh: Bool = false) async throws -> String {
         // 1. ClawdBar's own logged-in token (self-contained, auto-renewing)
-        var ownError: Error?
-        do {
-            if let token = try await ClaudeAuth.shared.validAccessToken(forceRefresh: forceRefresh) { return token }
-        } catch {
-            ownError = error
-        }
+        if let token = try await ClaudeAuth.shared.validAccessToken(forceRefresh: forceRefresh) { return token }
+        // Its login just expired: say so until the user logs in again or out
+        if ClaudeAuth.shared.signInExpired { throw ClaudeAuth.AuthError.signInExpired }
         if let cached = cachedToken { return cached }
-        // 2. Claude Code desktop app Keychain entry
+        // 2. Claude Code desktop app Keychain entry, read off the main thread
+        //    so its "allow access" prompt can't freeze the menu bar
         // 3. Standalone CLI credentials file
-        guard let token = (try? keychainCredentials()) ?? (try? cliFileCredentials()) else {
-            throw ownError ?? FetchError.noCredentials
+        var token: String?
+        if Date() >= keychainDeniedUntil {
+            switch await Task.detached(operation: { Self.keychainCredentials() }).value {
+            case .found(let found): token = found
+            case .denied: keychainDeniedUntil = Date().addingTimeInterval(15 * 60)
+            case .none: break
+            }
         }
+        guard let token = token ?? (try? Self.cliFileCredentials()) else { throw FetchError.noCredentials }
         cachedToken = token
         return token
     }
+
+    enum KeychainRead: Sendable { case found(String), denied, none }
 
     /// Sign-in problems are explained by ClawdBar's own login state when it has
     /// one: only an expired login asks the user to act; a failed renewal just
@@ -129,7 +140,7 @@ final class UsageFetcher: ObservableObject {
     /// query returns an *arbitrary* match, which is how we'd end up using an expired
     /// token and getting 401s ("credentials rejected") even though a valid token is
     /// present. So read them all and pick the token with the latest `expiresAt`.
-    private func keychainCredentials() throws -> String {
+    nonisolated private static func keychainCredentials() -> KeychainRead {
         // There can be more than one "Claude Code-credentials" item (a stale entry
         // from an old login next to the live one), and they can have DIFFERENT
         // access permissions. Asking for every item's data at once
@@ -152,6 +163,7 @@ final class UsageFetcher: ObservableObject {
         }
 
         var best: (token: String, expiresAt: Double)?
+        var denied = false
         for entry in entries {
             guard let ref = entry[kSecValuePersistentRef as String] as? Data else { continue }
             let dataQuery: [String: Any] = [
@@ -159,7 +171,9 @@ final class UsageFetcher: ObservableObject {
                 kSecReturnData as String: true,
             ]
             var dataResult: CFTypeRef?
-            guard SecItemCopyMatching(dataQuery as CFDictionary, &dataResult) == errSecSuccess,
+            let status = SecItemCopyMatching(dataQuery as CFDictionary, &dataResult)
+            if status == errSecUserCanceled || status == errSecAuthFailed { denied = true }
+            guard status == errSecSuccess,
                   let data = dataResult as? Data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let oauth = json["claudeAiOauth"] as? [String: Any],
@@ -167,11 +181,11 @@ final class UsageFetcher: ObservableObject {
             let expiresAt = (oauth["expiresAt"] as? NSNumber)?.doubleValue ?? 0
             if best == nil || expiresAt > best!.expiresAt { best = (token, expiresAt) }
         }
-        guard let token = best?.token else { throw FetchError.noCredentials }
-        return token
+        if let token = best?.token { return .found(token) }
+        return denied ? .denied : .none
     }
 
-    private func cliFileCredentials() throws -> String {
+    nonisolated private static func cliFileCredentials() throws -> String {
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/.credentials.json")
         guard let token = UsageParse.accessToken(fromCredentialsFile: try Data(contentsOf: path)) else {
@@ -182,7 +196,28 @@ final class UsageFetcher: ObservableObject {
 
     // MARK: - API
 
+    /// Reads usage from the endpoint Claude Code's /usage uses. It only reads,
+    /// so checking costs no quota and doesn't keep a 5-hour window open.
     private func fetchUsage(token: String) async throws -> UsageData {
+        var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await URLSession.clawdBar.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw FetchError.badResponse }
+        if http.statusCode == 401 { throw FetchError.tokenRejected }
+        // Should the endpoint ever go, the old way still works: a 1-token
+        // message whose rate-limit headers carry the same figures
+        if http.statusCode == 404 { return try await fetchUsageFromHeaders(token: token) }
+        guard http.statusCode == 200, let result = UsageParse.usage(fromUsageEndpoint: data) else {
+            throw FetchError.noRateLimitHeaders(statusCode: http.statusCode)
+        }
+        return result
+    }
+
+    private func fetchUsageFromHeaders(token: String) async throws -> UsageData {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -196,7 +231,7 @@ final class UsageFetcher: ObservableObject {
             "messages": [["role": "user", "content": "hi"]],
         ])
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await URLSession.clawdBar.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw FetchError.badResponse }
 
         if http.statusCode == 401 { throw FetchError.tokenRejected }
@@ -271,6 +306,17 @@ final class UsageFetcher: ObservableObject {
 
 private extension Double {
     var nonZero: Double? { self == 0 ? nil : self }
+}
+
+extension URLSession {
+    /// Gives up on a stalled request after 15 seconds, so a refresh (which
+    /// can chain a renewal and a retry) can't keep the spinner going for minutes
+    static let clawdBar: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        return URLSession(configuration: config)
+    }()
 }
 
 func formatTimeRemaining(until date: Date) -> String {

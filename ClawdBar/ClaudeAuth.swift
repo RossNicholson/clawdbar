@@ -41,6 +41,17 @@ final class ClaudeAuth: ObservableObject {
     private var retryDelay: TimeInterval = 0
     private var retryNotBefore = Date.distantPast
     private var lastRetryableError: Error?
+    // Bumped by every login and logout, so a renewal that started before one
+    // can't save its tokens (or sign out) afterwards
+    private var generation = 0
+    // A rejected token forces a renewal, but at most this often: a lasting
+    // rejection would otherwise spend a refresh token on every poll
+    private var lastRenewed = Date.distantPast
+    // Renewed tokens the Keychain wouldn't take (e.g. locked after sleep).
+    // The old refresh token is already spent, so these are the login now:
+    // used from memory and saved again on the next check.
+    private var unsaved: Creds?
+    private static let minForcedRenewalGap: TimeInterval = 5 * 60
 
     private let logger = Logger(subsystem: "com.rossnicholson.ClawdBar", category: "auth")
 
@@ -93,6 +104,11 @@ final class ClaudeAuth: ObservableObject {
         let parts = trimmed.split(separator: "#", maxSplits: 1).map(String.init)
         let code = parts.first ?? trimmed
         let state = parts.count > 1 ? parts[1] : (pendingState ?? "")
+        // The code must come from this login attempt, not an earlier tab
+        guard state == pendingState else {
+            loginError = "That code is from an earlier login attempt. Copy the code from the newest browser tab, or start again."
+            return
+        }
 
         do {
             let creds = try await exchange([
@@ -103,7 +119,9 @@ final class ClaudeAuth: ObservableObject {
                 "redirect_uri": redirectURI,
                 "code_verifier": verifier,
             ])
+            startNewGeneration()
             try store(creds)
+            lastRenewed = Date()
             isLoggedIn = true
             signInExpired = false
             clearRetryState()
@@ -125,10 +143,18 @@ final class ClaudeAuth: ObservableObject {
     }
 
     func logout() {
+        startNewGeneration()
         Self.deleteStored(service: service, account: account)
         isLoggedIn = false
         signInExpired = false
         clearRetryState()
+    }
+
+    /// Any renewal still running belongs to the old login: forget it
+    private func startNewGeneration() {
+        generation += 1
+        refreshTask = nil
+        unsaved = nil
     }
 
     // MARK: - Token access (used by UsageFetcher)
@@ -137,13 +163,32 @@ final class ClaudeAuth: ObservableObject {
     /// expiry, or when `forceRefresh` is set because the API rejected it.
     /// Returns nil if not logged in here (the caller falls back to Claude
     /// Code's token). Throws `AuthError.signInExpired` if the login is dead,
-    /// or the renewal error if it failed for a temporary reason; the login is
+    /// or the renewal error if it failed for a temporary reason once the token
+    /// has run out (until then the current token is still used); the login is
     /// kept and renewed again later.
     func validAccessToken(forceRefresh: Bool = false) async throws -> String? {
-        guard let creds = try? Self.readStored(service: service, account: account) else { return nil }
+        // Read off the main thread: a Keychain prompt would freeze the menu bar
+        let service = service, account = account
+        let stored = await Task.detached(operation: { try? Self.readStored(service: service, account: account) }).value
+        if let pending = unsaved, (try? store(pending)) != nil { unsaved = nil }
+        guard let creds = unsaved ?? stored else { return nil }
         let msToExpiry = creds.expiresAt - Date().timeIntervalSince1970 * 1000
-        guard forceRefresh || msToExpiry < 60_000 else { return creds.accessToken }
-        return try await refresh(creds).accessToken
+        // A forced renewal only if the token wasn't just renewed: a fresh token
+        // that's rejected won't be fixed by another one
+        let force = forceRefresh && Date().timeIntervalSince(lastRenewed) > Self.minForcedRenewalGap
+        guard force || msToExpiry < 60_000 else { return creds.accessToken }
+        do {
+            return try await refresh(creds).accessToken
+        } catch AuthError.signInExpired {
+            throw AuthError.signInExpired
+        } catch AuthError.notStored {
+            // Logged in or out while it renewed: use whatever's saved now
+            return try await validAccessToken()
+        } catch {
+            // The renewal can wait: the token still works until it expires
+            if msToExpiry > 0 && !force { return creds.accessToken }
+            throw error
+        }
     }
 
     // MARK: - Internals
@@ -152,19 +197,24 @@ final class ClaudeAuth: ObservableObject {
         if let refreshTask { return try await refreshTask.value }
         if Date() < retryNotBefore, let lastRetryableError { throw lastRetryableError }
 
-        let task = Task { try await renew(creds) }
+        let started = generation
+        let task = Task { try await renew(creds, generation: started) }
         refreshTask = task
-        defer { refreshTask = nil }
+        defer { if generation == started { refreshTask = nil } }
         do {
             let new = try await task.value
             clearRetryState()
             return new
         } catch AuthError.signInExpired {
+            // A login or logout since: its tokens aren't this renewal's to clear
+            guard generation == started else { throw AuthError.notStored }
             // The only failure that needs the user: the refresh token is dead
             logger.error("Refresh token rejected (invalid_grant); signing out")
             logout()
             signInExpired = true
             throw AuthError.signInExpired
+        } catch AuthError.notStored {
+            throw AuthError.notStored
         } catch {
             retryDelay = min(max(retryDelay * 2, 60), 15 * 60)
             retryNotBefore = Date().addingTimeInterval(retryDelay)
@@ -176,7 +226,7 @@ final class ClaudeAuth: ObservableObject {
     }
 
     /// Mirrors Claude Code's own renewal, which sends the scopes it holds
-    private func renew(_ creds: Creds) async throws -> Creds {
+    private func renew(_ creds: Creds, generation started: Int) async throws -> Creds {
         var grant = [
             "grant_type": "refresh_token",
             "refresh_token": creds.refreshToken,
@@ -192,7 +242,15 @@ final class ClaudeAuth: ObservableObject {
             grant["scope"] = nil
             new = try await exchange(grant)
         }
-        try store(new)
+        // Logged out (or in again) while this ran: don't bring the old login back
+        guard generation == started else { throw AuthError.notStored }
+        do {
+            try store(new)
+            unsaved = nil
+        } catch {
+            unsaved = new
+        }
+        lastRenewed = Date()
         return new
     }
 
@@ -209,7 +267,7 @@ final class ClaudeAuth: ObservableObject {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: grant)
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.clawdBar.data(for: req)
         guard let http = response as? HTTPURLResponse else { throw AuthError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
             switch UsageParse.tokenFailure(statusCode: http.statusCode, body: data) {
@@ -234,7 +292,7 @@ final class ClaudeAuth: ObservableObject {
 
     // MARK: - Keychain (ClawdBar's own item)
 
-    struct Creds { let accessToken: String; let refreshToken: String; let expiresAt: Double; let scope: String? }
+    struct Creds: Sendable { let accessToken: String; let refreshToken: String; let expiresAt: Double; let scope: String? }
 
     private func store(_ creds: Creds) throws {
         var fields: [String: Any] = [
@@ -244,17 +302,26 @@ final class ClaudeAuth: ObservableObject {
         ]
         fields["scope"] = creds.scope
         let json = try JSONSerialization.data(withJSONObject: fields)
-        Self.deleteStored(service: service, account: account)
-        let status = SecItemAdd([
+        // Update in place: deleting first would lose the login for good if the
+        // add then failed, and a renewal has already spent the old refresh token
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecValueData as String: json,
-        ] as CFDictionary, nil)
-        guard status == errSecSuccess else { throw AuthError.keychain(status) }
+        ]
+        var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: json] as CFDictionary)
+        if status == errSecItemNotFound {
+            var item = query
+            item[kSecValueData as String] = json
+            status = SecItemAdd(item as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else {
+            logger.error("Couldn't save the sign-in to the Keychain: \(status)")
+            throw AuthError.keychain(status)
+        }
     }
 
-    private static func readStored(service: String, account: String) throws -> Creds {
+    nonisolated private static func readStored(service: String, account: String) throws -> Creds {
         var item: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass as String: kSecClassGenericPassword,

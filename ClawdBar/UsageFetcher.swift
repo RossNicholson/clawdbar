@@ -30,9 +30,12 @@ final class UsageFetcher: ObservableObject {
     static let manualInterval: TimeInterval = 60
     static let intervals: [TimeInterval] = [5 * 60, 10 * 60, 15 * 60]
     private var lastRead = Date.distantPast
-    // After a 429: no checks at all until this, growing while they continue
-    private var rateLimitedUntil = Date.distantPast
-    private var rateLimitDelay: TimeInterval = 0
+    // After a 429 from the usage endpoint: read usage the old way (the
+    // headers of a 1-token message) until this, growing while 429s continue.
+    // The endpoint's limit seems to be shared with Claude Code's own checks,
+    // so with Claude Code open it can refuse ClawdBar for hours.
+    private var endpointLimitedUntil = Date.distantPast
+    private var endpointDelay: TimeInterval = 0
 
     static func interval(fromSetting stored: Double) -> TimeInterval {
         stored == 0 ? minimumInterval : max(stored, minimumInterval)
@@ -69,19 +72,17 @@ final class UsageFetcher: ObservableObject {
         cachedToken = nil
         keychainDeniedUntil = .distantPast
         // Another sign-in may be another account, with limits of its own
-        rateLimitedUntil = .distantPast
-        rateLimitDelay = 0
+        endpointLimitedUntil = .distantPast
+        endpointDelay = 0
         lastRead = .distantPast
     }
 
     /// `manual` is the refresh button (or a new sign-in): it may check after a
     /// minute, where the timer and opening the panel wait the full 5 minutes.
-    /// Nothing checks while Anthropic is rate limiting.
     func refresh(manual: Bool = false) async {
         // The timer, opening the panel and the refresh button can all ask at once
         guard !isLoading else { return }
         let now = Date()
-        guard now >= rateLimitedUntil else { return }
         let gap = manual ? Self.manualInterval : Self.minimumInterval - 5   // timer ticks drift a little
         guard now.timeIntervalSince(lastRead) >= gap else { return }
         lastRead = now
@@ -102,18 +103,7 @@ final class UsageFetcher: ObservableObject {
             usage = result
             lastUpdated = Date()
             lastError = nil
-            rateLimitDelay = 0
             checkNotifications(for: result)
-        } catch FetchError.rateLimited(let retryAfter) {
-            // Wait as long as Anthropic asks, else 5, 10, 20, then 30 minutes
-            rateLimitDelay = min(max(rateLimitDelay * 2, Self.minimumInterval), 30 * 60)
-            let wait = max(retryAfter ?? 0, rateLimitDelay)
-            rateLimitedUntil = Date().addingTimeInterval(wait)
-            // The last figures are still worth showing; only say so if there are none
-            if lastUpdated == nil {
-                lastError = "Anthropic is limiting how often usage can be checked. ClawdBar will try again "
-                    + "at \(rateLimitedUntil.formatted(date: .omitted, time: .shortened))."
-            }
         } catch {
             lastError = message(for: error)
         }
@@ -239,7 +229,23 @@ final class UsageFetcher: ObservableObject {
 
     /// Reads usage from the endpoint Claude Code's /usage uses. It only reads,
     /// so checking costs no quota and doesn't keep a 5-hour window open.
+    /// While that endpoint is refusing with 429s, the old way is used instead.
     private func fetchUsage(token: String) async throws -> UsageData {
+        guard Date() >= endpointLimitedUntil else { return try await fetchUsageFromHeaders(token: token) }
+        do {
+            let result = try await fetchUsageFromEndpoint(token: token)
+            endpointDelay = 0
+            return result
+        } catch FetchError.rateLimited(let retryAfter) {
+            // Leave the endpoint alone for as long as Anthropic asks, else
+            // 15 minutes, then 30, then an hour
+            endpointDelay = min(max(endpointDelay * 2, 15 * 60), 60 * 60)
+            endpointLimitedUntil = Date().addingTimeInterval(max(retryAfter ?? 0, endpointDelay))
+            return try await fetchUsageFromHeaders(token: token)
+        }
+    }
+
+    private func fetchUsageFromEndpoint(token: String) async throws -> UsageData {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")

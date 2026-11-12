@@ -157,4 +157,4 @@ If ClawdBar helps you pace your day, you can [buy me a coffee](https://buymeacof
 
 MIT. See [LICENSE](LICENSE).
 
-The look and the menu bar panel come from [HouseStyle](https://github.com/RossNicholson/mac-house-style) (MIT), shared with my other Mac apps, BrewDock, Mop Up, KeyBar and Repo Radar. Its bundled fonts, Barlow Condensed and Geist Mono, are under the SIL Open Font License. ClawdBar is an independent app and isn't affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.
+The look and the menu bar panel come from [HouseStyle](https://github.com/RossNicholson/mac-house-style) (MIT), shared with my other Mac apps, BrewDock, Mop Up, KeyBar, Repo Radar and MacPing. Its bundled fonts, Barlow Condensed and Geist Mono, are under the SIL Open Font License. ClawdBar is an independent app and isn't affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.

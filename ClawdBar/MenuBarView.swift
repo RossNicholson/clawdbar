@@ -40,7 +40,7 @@ struct MenuBarView: View {
         .sheet(isPresented: $auth.awaitingCode) {
             LoginCodeView {
                 fetcher.resetCredentials()
-                Task { await fetcher.refresh() }
+                Task { await fetcher.refresh(manual: true) }
             }
         }
     }
@@ -52,7 +52,7 @@ struct MenuBarView: View {
             Mascot(size: PanelMetrics.mascot)
         } actions: {
             HeaderRefreshButton(isRefreshing: fetcher.isLoading) {
-                Task { await fetcher.refresh() }
+                Task { await fetcher.refresh(manual: true) }
             }
             HeaderIconButton(symbol: "gearshape", help: "Settings") {
                 showingSettings.toggle()

@@ -23,9 +23,27 @@ final class UsageFetcher: ObservableObject {
     // every poll; a manual refresh (resetCredentials) asks straight away
     private var keychainDeniedUntil = Date.distantPast
 
+    /// The usage endpoint is rate limited: Claude Code reads it at most every
+    /// 5 minutes, and asking more often gets HTTP 429s. Automatic checks keep
+    /// to that; the refresh button may ask after a minute.
+    static let minimumInterval: TimeInterval = 5 * 60
+    static let manualInterval: TimeInterval = 60
+    static let intervals: [TimeInterval] = [5 * 60, 10 * 60, 15 * 60]
+    private var lastRead = Date.distantPast
+    // After a 429: no checks at all until this, growing while they continue
+    private var rateLimitedUntil = Date.distantPast
+    private var rateLimitDelay: TimeInterval = 0
+
+    static func interval(fromSetting stored: Double) -> TimeInterval {
+        stored == 0 ? minimumInterval : max(stored, minimumInterval)
+    }
+
     func start() {
-        let interval = UserDefaults.standard.double(forKey: "refreshInterval").nonZero ?? 60
-        Task { await refresh() }
+        // Settings from before 1.3.4 could be 30 seconds or 1 minute
+        let stored = UserDefaults.standard.double(forKey: "refreshInterval")
+        let interval = Self.interval(fromSetting: stored)
+        if stored != interval { UserDefaults.standard.set(interval, forKey: "refreshInterval") }
+        Task { await refresh(manual: true) }
         scheduleTimer(interval: interval)
     }
 
@@ -35,7 +53,7 @@ final class UsageFetcher: ObservableObject {
     }
 
     func setRefreshInterval(_ interval: TimeInterval) {
-        scheduleTimer(interval: interval)
+        scheduleTimer(interval: Self.interval(fromSetting: interval))
     }
 
     private func scheduleTimer(interval: TimeInterval) {
@@ -50,11 +68,23 @@ final class UsageFetcher: ObservableObject {
     func resetCredentials() {
         cachedToken = nil
         keychainDeniedUntil = .distantPast
+        // Another sign-in may be another account, with limits of its own
+        rateLimitedUntil = .distantPast
+        rateLimitDelay = 0
+        lastRead = .distantPast
     }
 
-    func refresh() async {
+    /// `manual` is the refresh button (or a new sign-in): it may check after a
+    /// minute, where the timer and opening the panel wait the full 5 minutes.
+    /// Nothing checks while Anthropic is rate limiting.
+    func refresh(manual: Bool = false) async {
         // The timer, opening the panel and the refresh button can all ask at once
         guard !isLoading else { return }
+        let now = Date()
+        guard now >= rateLimitedUntil else { return }
+        let gap = manual ? Self.manualInterval : Self.minimumInterval - 5   // timer ticks drift a little
+        guard now.timeIntervalSince(lastRead) >= gap else { return }
+        lastRead = now
         isLoading = true
         // lastError is kept until this refresh finishes, so the error card
         // doesn't vanish and reappear (resizing the panel) on every retry
@@ -72,7 +102,18 @@ final class UsageFetcher: ObservableObject {
             usage = result
             lastUpdated = Date()
             lastError = nil
+            rateLimitDelay = 0
             checkNotifications(for: result)
+        } catch FetchError.rateLimited(let retryAfter) {
+            // Wait as long as Anthropic asks, else 5, 10, 20, then 30 minutes
+            rateLimitDelay = min(max(rateLimitDelay * 2, Self.minimumInterval), 30 * 60)
+            let wait = max(retryAfter ?? 0, rateLimitDelay)
+            rateLimitedUntil = Date().addingTimeInterval(wait)
+            // The last figures are still worth showing; only say so if there are none
+            if lastUpdated == nil {
+                lastError = "Anthropic is limiting how often usage can be checked. ClawdBar will try again "
+                    + "at \(rateLimitedUntil.formatted(date: .omitted, time: .shortened))."
+            }
         } catch {
             lastError = message(for: error)
         }
@@ -208,6 +249,9 @@ final class UsageFetcher: ObservableObject {
         let (data, response) = try await URLSession.clawdBar.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw FetchError.badResponse }
         if http.statusCode == 401 { throw FetchError.tokenRejected }
+        if http.statusCode == 429 {
+            throw FetchError.rateLimited(retryAfter: (http.value(forHTTPHeaderField: "Retry-After")).flatMap(TimeInterval.init))
+        }
         // Should the endpoint ever go, the old way still works: a 1-token
         // message whose rate-limit headers carry the same figures
         if http.statusCode == 404 { return try await fetchUsageFromHeaders(token: token) }
@@ -288,6 +332,7 @@ final class UsageFetcher: ObservableObject {
         case badResponse
         case tokenRejected
         case noRateLimitHeaders(statusCode: Int)
+        case rateLimited(retryAfter: TimeInterval?)
 
         var errorDescription: String? {
             switch self {
@@ -299,6 +344,8 @@ final class UsageFetcher: ObservableObject {
                 return "Claude credentials were rejected — try signing in again via Claude Code"
             case .noRateLimitHeaders(let code):
                 return UsageParse.noUsageMessage(statusCode: code)
+            case .rateLimited:
+                return UsageParse.noUsageMessage(statusCode: 429)
             }
         }
     }

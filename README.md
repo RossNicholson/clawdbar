@@ -67,7 +67,7 @@ Open **Settings → Check for updates → Update ClawdBar**, and it quits, updat
 - **At a glance:** click for a colour-block card per limit (mint, then butter, then peach), with the exact percentage, a progress bar and when it resets.
 - **Weekly forecast:** a striped "ghost" on the weekly bar shows where you'll be at reset at your current pace, with a plain verdict: plenty to spare, how much a day you can use and still last, or roughly when you'll run out.
 - **Usage alerts:** an optional notification when a limit passes your threshold (50–95%, 80% by default). Each limit alerts once per window, even if ClawdBar restarts.
-- **Your pace:** check every 30 seconds, every minute or every 5 minutes.
+- **Your pace:** check every 5, 10 or 15 minutes. Anthropic allows a usage check about every 5 minutes, the same as Claude Code's own `/usage`; the refresh button can check again after a minute.
 - **Its own sign-in, if you want it:** ClawdBar normally uses Claude Code's sign-in. You can also log in with Claude directly, so it keeps working when Claude Code's session expires.
 - **Make it bigger:** drag the grip in the panel's bottom-right corner. ClawdBar remembers the size.
 - **Launch at login,** light and dark mode, VoiceOver support, and a small cat who waves hello.

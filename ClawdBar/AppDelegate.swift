@@ -101,10 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Fresh numbers on open if the last refresh is more than 30 seconds old
+    /// Fresh numbers on open, when the usage check allows another one
+    /// (the fetcher keeps to Anthropic's rate limit)
     private func refreshIfStale() {
-        if hasGrantedAccess, !fetcher.isLoading,
-           (fetcher.lastUpdated.map { Date().timeIntervalSince($0) > 30 } ?? true) {
+        if hasGrantedAccess, !fetcher.isLoading {
             Task { await fetcher.refresh() }
         }
     }

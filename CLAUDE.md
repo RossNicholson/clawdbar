@@ -4,6 +4,10 @@ Mac menu bar app showing Claude Code's 5-hour and 7-day usage limits. Release wi
 `make release VERSION=x.y.z` (see RELEASING.md); Ross runs releases.
 
 ## Where we left off (2026-11-12)
+- **1.3.3's usage endpoint got HTTP 429s** (polled every 30s; Claude Code reads `/api/oauth/usage` at most
+  every 5 min, `bSo=300000` in its binary). Fixed on main for 1.3.4: automatic checks every 5/10/15 min
+  (old 30s/1min settings migrate to 5), refresh button after 1 min, 429 backs off (Retry-After, else
+  5→10→20→30 min) and keeps the last figures.
 - **Review fixes on main, waiting for a release** (after 1.3.2):
   - Usage now comes from `GET https://api.anthropic.com/api/oauth/usage` (what Claude Code's
     `/usage` reads; `five_hour`/`seven_day` → `utilization` in percent, `resets_at` ISO 8601).

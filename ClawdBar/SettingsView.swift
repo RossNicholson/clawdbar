@@ -13,7 +13,7 @@ struct SettingsView: View {
     @State private var notificationError: String? = nil
     @AppStorage("notifyEnabled") private var notifyEnabled = false
     @AppStorage("notifyThresholdPercent") private var notifyThresholdPercent = 80
-    @AppStorage("refreshInterval") private var refreshInterval = 60.0
+    @AppStorage("refreshInterval") private var refreshInterval = UsageFetcher.minimumInterval
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -44,13 +44,9 @@ struct SettingsView: View {
                 }
             }
 
-            SettingCard(title: "Refresh every", detail: "How often ClawdBar checks your usage", below: {
-                PillPicker(selection: $refreshInterval, options: [30.0, 60.0, 300.0], track: AppColors.ground) {
-                    switch $0 {
-                    case 30: return "30 sec"
-                    case 60: return "1 min"
-                    default: return "5 min"
-                    }
+            SettingCard(title: "Refresh every", detail: "How often ClawdBar checks your usage. Anthropic allows a check about every 5 minutes.", below: {
+                PillPicker(selection: $refreshInterval, options: UsageFetcher.intervals, track: AppColors.ground) {
+                    "\(Int($0 / 60)) min"
                 }
                 .onChange(of: refreshInterval) { interval in
                     fetcher.setRefreshInterval(interval)
@@ -62,7 +58,7 @@ struct SettingsView: View {
                     if auth.isLoggedIn {
                         auth.logout()
                         fetcher.resetCredentials()
-                        Task { await fetcher.refresh() }
+                        Task { await fetcher.refresh(manual: true) }
                     } else {
                         dismiss()          // close this popover so the login sheet can show
                         auth.beginLogin()

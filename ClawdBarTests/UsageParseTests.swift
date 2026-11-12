@@ -168,3 +168,14 @@ final class UsageParseTests: XCTestCase {
         XCTAssertEqual(when(2 * 86400, uk), "Fri ~18:00")
     }
 }
+
+@MainActor
+final class RefreshIntervalTests: XCTestCase {
+    func testOldShortIntervalsBecomeFiveMinutes() {
+        XCTAssertEqual(UsageFetcher.interval(fromSetting: 0), 300, "no setting: 5 minutes")
+        XCTAssertEqual(UsageFetcher.interval(fromSetting: 30), 300, "30 seconds from before 1.3.4")
+        XCTAssertEqual(UsageFetcher.interval(fromSetting: 60), 300)
+        XCTAssertEqual(UsageFetcher.interval(fromSetting: 900), 900)
+        XCTAssertTrue(UsageFetcher.intervals.allSatisfy { $0 >= UsageFetcher.minimumInterval })
+    }
+}
